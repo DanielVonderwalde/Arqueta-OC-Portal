@@ -530,12 +530,23 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 
     <div class="upload-box" style="text-align:left;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-color:#E4C3BF;">
       <div>
-        <strong style="color:var(--brick);">2. Cargar Excel de costos (interno)</strong>
-        <div style="margin-top:2px;">El Excel de Esko/Phoenix — de ahí se toma el desglose de costo (sustrato, acabado, materiales, MOD, EE, extras, transporte) para las cantidades ya cargadas del PDF.</div>
+        <strong style="color:var(--brick);">2. Cargar Excel de costos — Caja (interno)</strong>
+        <div style="margin-top:2px;">El Excel de Esko/Phoenix — de ahí se toma el desglose de costo para la caja.</div>
       </div>
       <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;">Elegir Excel<input type="file" id="mq-excel-autofill" accept=".xlsx,.xls" style="display:none;" onchange="handleExcelAutofill(this)"></label>
     </div>
     <div class="small-note" id="mq-excel-status" style="margin:-4px 0 14px;"></div>
+
+    <div id="mq-inserto-upload" style="display:none;">
+      <div class="upload-box" style="text-align:left;display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;border-color:#E4C3BF;">
+        <div>
+          <strong style="color:var(--brick);">3. Cargar Excel de costos — Inserto (interno)</strong>
+          <div style="margin-top:2px;">El Excel del inserto — mismo formato, se muestra como un segundo desglose de costo.</div>
+        </div>
+        <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;">Elegir Excel<input type="file" id="mq-excel-inserto-autofill" accept=".xlsx,.xls" style="display:none;" onchange="handleExcelInsertoAutofill(this)"></label>
+      </div>
+      <div class="small-note" id="mq-excel-inserto-status" style="margin:-4px 0 14px;"></div>
+    </div>
 
     <div class="formrow">
       <div class="field"><label>Cliente</label><select id="mq-client"></select></div>
@@ -589,25 +600,22 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 </div>
 
 <div class="modal-overlay" id="modal-po">
-  <div class="modal">
+  <div class="modal wide">
     <button class="modal-close" onclick="closeModal('modal-po')">×</button>
     <h2>Registrar orden de compra</h2>
     <div class="formrow">
-      <div class="field"><label>Cliente</label><select id="mp-client" onchange="refreshPOQuoteOptions()"></select></div>
-      <div class="field"><label>Cotización</label><select id="mp-quote"></select></div>
+      <div class="field"><label>Cliente</label><select id="mp-client"></select></div>
+      <div class="field"><label>Número de OC</label><input type="text" id="mp-number" placeholder="OC-001"></div>
     </div>
     <div class="formrow">
-      <div class="field"><label>Número de OC</label><input type="text" id="mp-number"></div>
       <div class="field"><label>Fecha recibida</label><input type="date" id="mp-date"></div>
+      <div class="field"><label>Archivo (PDF/imagen de la OC)</label><input type="file" id="mp-file" accept=".pdf,.png,.jpg,.jpeg"></div>
     </div>
-    <div class="formrow">
-      <div class="field"><label>Cantidad ordenada</label><input type="number" id="mp-qty"></div>
-      <div class="field"><label>Material especificado</label><input type="text" id="mp-material"></div>
-    </div>
+    <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Productos en esta orden</div>
+    <div id="mp-lines"></div>
+    <button class="addtier-btn" style="margin-bottom:14px;" onclick="addAdminOCLine()">+ Agregar otro producto</button>
     <div class="formrow single">
-      <div class="field"><label>Estado</label>
-        <select id="mp-status"><option value="pendiente">Pendiente</option><option value="en producción">En producción</option><option value="entregada">Entregada</option></select>
-      </div>
+      <div class="field"><label>Notas</label><textarea id="mp-notes" rows="2" placeholder="Material, fecha requerida, etc."></textarea></div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeModal('modal-po')">Cancelar</button>
@@ -1173,7 +1181,10 @@ function addTierRow(data){
   `;
   document.getElementById('mq-tiers').appendChild(wrap);
 }
-function toggleInserto(){}
+function toggleInserto(){
+  const checked = document.getElementById('mq-inserto').checked;
+  document.getElementById('mq-inserto-upload').style.display = checked ? '' : 'none';
+}
 
 function applyStandardTiers(){
   document.getElementById('mq-tiers').innerHTML='';
@@ -1658,31 +1669,66 @@ function openPOModal(){
   refreshPOQuoteOptions();
   document.getElementById('mp-number').value='';
   document.getElementById('mp-date').value = new Date().toISOString().slice(0,10);
-  document.getElementById('mp-qty').value='';
-  document.getElementById('mp-material').value='';
-  document.getElementById('mp-status').value='pendiente';
+  document.getElementById('mp-notes').value='';
+  document.getElementById('mp-file').value='';
+  document.getElementById('mp-lines').innerHTML='';
+  for(let i=0;i<3;i++) addAdminOCLine();
   document.getElementById('modal-po').classList.add('active');
 }
-function refreshPOQuoteOptions(){
-  const clientId = document.getElementById('mp-client').value;
-  const qs = quotesForClient(clientId);
-  document.getElementById('mp-quote').innerHTML = qs.map(q=>`<option value="${q.id}">${q.quote_number} — ${q.product_name}</option>`).join('') || '<option value="">Sin cotizaciones</option>';
+function addAdminOCLine(){
+  const wrap = document.getElementById('mp-lines');
+  const div = document.createElement('div');
+  div.style.cssText='display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1fr 30px;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;';
+  div.innerHTML = '<div class="field" style="margin:0;"><label>Código</label><input type="text" class="mp-codigo" placeholder="SKU"></div>'+
+    '<div class="field" style="margin:0;"><label>Producto</label><input type="text" class="mp-product" placeholder="NOMBRE"></div>'+
+    '<div class="field" style="margin:0;"><label>Cantidad</label><input type="number" class="mp-qty" placeholder="25000"></div>'+
+    '<div class="field" style="margin:0;"><label>Precio unit. sin imp.</label><input type="number" step="0.01" class="mp-price" placeholder="1.00" oninput="calcAdminOCTotal(this)"></div>'+
+    '<div class="field" style="margin:0;"><label>Valor total</label><div class="mp-total" style="padding:10px 0;font-weight:600;font-family:\'JetBrains Mono\',monospace;font-size:13px;">$0.00</div></div>'+
+    '<button style="background:none;border:none;color:var(--brick);font-size:18px;cursor:pointer;" onclick="this.parentElement.remove()">✕</button>';
+  wrap.appendChild(div);
+}
+function calcAdminOCTotal(input){
+  const line = input.closest('div[style*="grid"]');
+  const q = Number(line.querySelector('.mp-qty').value)||0;
+  const p = Number(line.querySelector('.mp-price').value)||0;
+  line.querySelector('.mp-total').textContent = '$'+(q*p).toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
 }
 function savePO(){
   const clientId = document.getElementById('mp-client').value;
-  const quoteId = document.getElementById('mp-quote').value;
   const number = document.getElementById('mp-number').value.trim();
-  const qtyOrdered = Number(document.getElementById('mp-qty').value)||0;
-  if(!clientId || !quoteId || !number || !qtyOrdered){ showToast('Completa cliente, cotización, número y cantidad'); return; }
-  DB.purchaseOrders.push({
-    id: uid('po'), po_number:number, client_id:clientId, quote_id:quoteId,
-    date_received: document.getElementById('mp-date').value,
-    quantity_ordered: qtyOrdered,
-    material_specified: document.getElementById('mp-material').value.trim(),
-    status: document.getElementById('mp-status').value
-  });
-  saveData(); closeModal('modal-po'); renderPOList(); renderInicio();
-  showToast('Orden de compra registrada');
+  const notes = document.getElementById('mp-notes').value.trim();
+  const fileInput = document.getElementById('mp-file');
+
+  const lines = Array.from(document.getElementById('mp-lines').children).map(el=>({
+    codigo: (el.querySelector('.mp-codigo').value||'').trim(),
+    product: (el.querySelector('.mp-product').value||'').trim(),
+    quantity: Number(el.querySelector('.mp-qty').value)||0,
+    unit_price: Number(el.querySelector('.mp-price').value)||0
+  })).filter(l=>l.product && l.quantity>0);
+
+  if(!clientId || !number){ showToast('Completa cliente y número de OC'); return; }
+  if(!lines.length){ showToast('Agrega al menos un producto'); return; }
+
+  const finish = (fileName, fileData) => {
+    if(!DB.clientOCs) DB.clientOCs = [];
+    DB.clientOCs.push({
+      id: uid('coc'), client_id:clientId, oc_number:number,
+      lines: lines, notes: notes,
+      fileName: fileName||'', fileData: fileData||'',
+      date_submitted: document.getElementById('mp-date').value,
+      status: 'pendiente'
+    });
+    saveData(); closeModal('modal-po'); renderPOList(); renderInicio();
+    showToast('Orden de compra registrada');
+  };
+
+  if(fileInput.files[0]){
+    const reader = new FileReader();
+    reader.onload = e => finish(fileInput.files[0].name, e.target.result);
+    reader.readAsDataURL(fileInput.files[0]);
+  } else {
+    finish('','');
+  }
 }
 function poMatches(po){
   const tiers = tiersForQuote(po.quote_id);
