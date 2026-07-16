@@ -723,6 +723,17 @@ function mergeFiles(db){
     });
   }catch(e){}
 }
+function normalizeDB(d){
+  const toArr = v => { if(!v) return []; if(Array.isArray(v)) return v; return Object.values(v); };
+  d.clients = toArr(d.clients);
+  d.quotes = toArr(d.quotes);
+  d.costBreakdown = toArr(d.costBreakdown);
+  d.purchaseOrders = toArr(d.purchaseOrders);
+  d.clientOCs = toArr(d.clientOCs);
+  d.notifEmails = toArr(d.notifEmails);
+  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); });
+  return d;
+}
 let DB = seedData();
 const DATA_VERSION = 3;
 let firebaseReady = false;
@@ -748,7 +759,7 @@ async function initFirebase(){
       await fbRef.set(seed);
       DB = seed;
     } else {
-      DB = data;
+      DB = normalizeDB(data);
     }
     if(!DB.clientOCs) DB.clientOCs = [];
     if(!DB.notifEmails) DB.notifEmails = ['daniel.vonderwalde@arquetaf.com'];
@@ -762,7 +773,7 @@ async function initFirebase(){
     fbRef.on('value', snap=>{
       const d = snap.val();
       if(d){
-        DB = d;
+        DB = normalizeDB(d);
         if(!DB.clientOCs) DB.clientOCs = [];
         if(!DB.notifEmails) DB.notifEmails = ['daniel.vonderwalde@arquetaf.com'];
         if(!DB.purchaseOrders) DB.purchaseOrders = [];
