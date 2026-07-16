@@ -675,7 +675,46 @@ function seedData(){
   };
 }
 
-function saveData(){ fbRef.set(DB).catch(e=>console.error('Firebase write error:',e)); }
+function saveData(){
+  // Save files locally (too heavy for Firebase real-time sync)
+  localStorage.setItem('arqueta_files', JSON.stringify(extractFiles(DB)));
+  // Strip base64 data before sending to Firebase — only sync structured data
+  const lite = JSON.parse(JSON.stringify(DB));
+  (lite.quotes||[]).forEach(q=>{
+    if(q.pdfData && q.pdfData.length > 100) q.pdfData = '';
+    if(q.excelData && q.excelData.length > 100) q.excelData = '';
+    if(q.excelInsertoData && q.excelInsertoData.length > 100) q.excelInsertoData = '';
+  });
+  (lite.clientOCs||[]).forEach(o=>{
+    if(o.fileData && o.fileData.length > 100) o.fileData = '';
+  });
+  fbRef.set(lite).catch(e=>console.error('Firebase write error:',e));
+}
+function extractFiles(db){
+  const files = {};
+  (db.quotes||[]).forEach(q=>{
+    if(q.pdfData && q.pdfData.length > 100) files['pdf_'+q.id] = {name:q.pdfName, data:q.pdfData};
+    if(q.excelData && q.excelData.length > 100) files['xls_'+q.id] = {name:q.excelName, data:q.excelData};
+    if(q.excelInsertoData && q.excelInsertoData.length > 100) files['xlsi_'+q.id] = {name:q.excelInsertoName, data:q.excelInsertoData};
+  });
+  (db.clientOCs||[]).forEach(o=>{
+    if(o.fileData && o.fileData.length > 100) files['oc_'+o.id] = {name:o.fileName, data:o.fileData};
+  });
+  return files;
+}
+function mergeFiles(db){
+  try{
+    const files = JSON.parse(localStorage.getItem('arqueta_files')||'{}');
+    (db.quotes||[]).forEach(q=>{
+      const pf = files['pdf_'+q.id]; if(pf && !q.pdfData){ q.pdfName=pf.name; q.pdfData=pf.data; }
+      const xf = files['xls_'+q.id]; if(xf && !q.excelData){ q.excelName=xf.name; q.excelData=xf.data; }
+      const xi = files['xlsi_'+q.id]; if(xi && !q.excelInsertoData){ q.excelInsertoName=xi.name; q.excelInsertoData=xi.data; }
+    });
+    (db.clientOCs||[]).forEach(o=>{
+      const of2 = files['oc_'+o.id]; if(of2 && !o.fileData){ o.fileName=of2.name; o.fileData=of2.data; }
+    });
+  }catch(e){}
+}
 let DB = seedData();
 const DATA_VERSION = 3;
 let firebaseReady = false;
@@ -707,6 +746,7 @@ async function initFirebase(){
     if(!DB.notifEmails) DB.notifEmails = ['daniel.vonderwalde@arquetaf.com'];
     if(!DB.purchaseOrders) DB.purchaseOrders = [];
     firebaseReady = true;
+    mergeFiles(DB);
     console.log('Firebase loaded, version', DB._version);
     renderAll();
 
@@ -718,9 +758,10 @@ async function initFirebase(){
         if(!DB.clientOCs) DB.clientOCs = [];
         if(!DB.notifEmails) DB.notifEmails = ['daniel.vonderwalde@arquetaf.com'];
         if(!DB.purchaseOrders) DB.purchaseOrders = [];
+        mergeFiles(DB);
         renderAll();
         if(currentQuoteId) openQuoteDetail(currentQuoteId);
-        console.log('Firebase sync update received');
+        console.log('Firebase sync received');
       }
     });
   }catch(e){
