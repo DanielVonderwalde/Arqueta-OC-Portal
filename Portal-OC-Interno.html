@@ -244,11 +244,14 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <p class="sub">Cotizaciones, costos y órdenes de compra — folding cartons.</p>
     <div class="field">
       <label>Usuario</label>
-      <input type="text" id="login-user" placeholder="admin / asociado" autocomplete="username">
+      <input type="text" id="login-user" placeholder="Usuario" autocomplete="username">
     </div>
-    <div class="login-error" id="login-error">Usuario no reconocido.</div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <div class="login-error" id="login-error">Usuario o contraseña incorrectos.</div>
     <button class="btn btn-primary btn-block" onclick="handleLogin()">Entrar</button>
-    <div class="login-hint">Usuarios: admin · asociado</div>
   </div>
 </div>
 
@@ -778,7 +781,8 @@ function statusBadge(status){
    ========================================================= */
 function handleLogin(){
   const u = document.getElementById('login-user').value.trim();
-  const found = USERS.find(x=>x.user===u);
+  const p = document.getElementById('login-pass').value;
+  const found = USERS.find(x=>x.user===u && x.pass===p);
   if(found){
     currentRole = found.role;
     document.getElementById('login-screen').style.display='none';
@@ -806,7 +810,7 @@ function handleLogout(){
   document.getElementById('login-user').value='';
   document.getElementById('login-pass').value='';
 }
-document.getElementById('login-user').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
+document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
 window.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{weekday:'long', year:'numeric', month:'long', day:'numeric'});
   await initFirebase();
