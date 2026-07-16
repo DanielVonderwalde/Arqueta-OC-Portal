@@ -158,19 +158,24 @@ tr:last-child td{border-bottom:none;}
 
 <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
-function loadData(){
-  const raw = localStorage.getItem('arqueta_db');
-  if(!raw) return {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[]};
-  try{
-    const d = JSON.parse(raw);
-    if(!d.clientOCs) d.clientOCs = [];
-    return d;
-  }catch(e){ return {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[]}; }
-}
-function saveData(db){ localStorage.setItem('arqueta_db', JSON.stringify(db)); }
-let DB = loadData();
+firebase.initializeApp({
+  apiKey: "AIzaSyBH2ykaKrIFOQorRBXHIocrau5JFe-BxMk",
+  authDomain: "arqueta-portal.firebaseapp.com",
+  databaseURL: "https://arqueta-portal-default-rtdb.firebaseio.com",
+  projectId: "arqueta-portal",
+  storageBucket: "arqueta-portal.firebasestorage.app",
+  messagingSenderId: "368467802357",
+  appId: "1:368467802357:web:7b8b1fa2ca121dfe2fedbc"
+});
+const fbRef = firebase.database().ref('arqueta_db');
+
+let DB = {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[], notifEmails:[]};
 let currentClient = null;
+
+function saveData(){ fbRef.set(DB).catch(e=>console.error('Firebase write error:',e)); }
 
 function money(n){
   if(n===null||n===undefined||isNaN(n)) return '—';
@@ -288,7 +293,6 @@ function submitOC(){
   if(!lines.length){ showToast('Agrega al menos un producto con nombre y cantidad'); return; }
 
   const finish = (fileName, fileData) => {
-    DB = loadData();
     if(!DB.clientOCs) DB.clientOCs = [];
     DB.clientOCs.push({
       id: uid('coc'),
@@ -301,7 +305,7 @@ function submitOC(){
       date_submitted: new Date().toISOString().slice(0,10),
       status: 'pendiente'
     });
-    saveData(DB);
+    saveData();
     document.getElementById('oc-number').value='';
     document.getElementById('oc-notes').value='';
     fileInput.value='';
@@ -380,12 +384,36 @@ function notifyNewOC(ocNumber, lines, clientName){
   window.open(mailto, '_blank');
 }
 
-window.addEventListener('DOMContentLoaded', ()=>{
+window.addEventListener('DOMContentLoaded', async ()=>{
+  try{
+    const snapshot = await fbRef.once('value');
+    const data = snapshot.val();
+    if(data){
+      DB = data;
+      if(!DB.clientOCs) DB.clientOCs = [];
+      if(!DB.notifEmails) DB.notifEmails = [];
+    }
+  }catch(e){ console.error('Firebase load error:',e); }
+
   const savedId = sessionStorage.getItem('arqueta_portal_client');
   if(savedId){
     const client = DB.clients.find(c=>c.id===savedId && c.portal_active);
     if(client){ currentClient=client; showPortal(client); }
   }
+
+  // Real-time listener — see status changes instantly
+  fbRef.on('value', snap=>{
+    const d = snap.val();
+    if(d){
+      DB = d;
+      if(!DB.clientOCs) DB.clientOCs = [];
+      if(!DB.notifEmails) DB.notifEmails = [];
+      if(currentClient){
+        currentClient = DB.clients.find(c=>c.id===currentClient.id);
+        if(currentClient) renderMyOCs(currentClient);
+      }
+    }
+  });
 });
 </script>
 </body>
