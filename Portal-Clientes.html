@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arqueta Folding — Portal de clientes</title>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAC6UlEQVR4nO2aoW4bQRCGJ1WkwDAbJaygjkzyApUVaOLCQKMyB/UpilIWFGhYk8Lq1BcoqeJWCqtJa9gXcMGvrFa3u7Mzu3M+R8qHknPi/N8/e749O0e73Y6eM6/6DlDLi0DfdC5w1zx2+vxH3Z3E337+JaJff/7h2/eT1138lU4EEB04AWCuYSzgRwctAWCoYSYQRgdRAWCiYSCQig4YAVCpUSXARwdZAVCsUf4yKkkvZHh6svr+u+x3Syagii6ZwPD0xH09uzxXhdEJFLSeFfDTO+QaUoHiBVMmACQaeYHKtc4LMOkdvAYnYHKaMgKS9I6URlzA8BXGSgCEGr1NQJs+NYHj6NGLmxURPdzOyHQaZSD6u49fiejzh6vWo3EB0J2GsH4/egpOADiNPY9idnnORwd5AXBxs7IaRbZ+SfEOqQAZrSg+vSo6UAiA7k4M4ZppoRagp/RE9PbNUOWQqr+geIdOANHPru/dkc1yThWjqIkOFAIPtzM/OsARiUar/vroQCQQFt/CaaQcwvT10UFeIFp8lLPr++worIp3cALZ4kOiKwr1m0cH3GZOFT0EGnfNI27YTaJL90KV0f0n2Szn5q37lFwHemEyGiym4/D4MxCYjAbMowf9+cBkNHDpF9Pxpy8/wp85XAG+eMchLqEweqp+OjSBaOtMeqpcQnilN8Ff7irKBZC+3oGPztdPxQJ+7mKH4tZ9+jkHhLmz9VPZBMLKVUMwTE8FAn7W8NaMx2TNtNAJhOmFDtrowvppP1di89Z9FAKpxZMdQrPeqjLJ66eUwGY5b0VJpQ+PmDiELKbj6HY6/wlN/X2Zf0OTXU5h/dHcjvx1AI2a3KPR0yhSGq30fHQgvZCZa/CjkEQHuiuxoUY4CtQvjw4Kr8RW+9DWya1NT/W70Xqa9bZZbwuig6rNnMmKCt/qUWGwGy3WqIwOzLbTKg2T6MD4fiCrYRgddHJDE9Uwjw46/LfL/XC4b2wJeRHom/9OwZ2R/Ev40AAAAABJRU5ErkJggg==">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#1A2744; --paper:#FFFFFF; --paper-raised:#F5F7FA; --card:#FFFFFF; --line:#D8E0EA;
+  --kraft:#2B5D9B; --kraft-soft:#D6E4F0; --teal:#2F6F62; --teal-soft:#DCE9E4; --muted:#6B7A8D;
+  --brick:#A63A3A; --brick-soft:#F1DCDA;
+  --shadow: 0 1px 2px rgba(26,39,68,0.06), 0 4px 14px rgba(26,39,68,0.06);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{font-family:'Inter',sans-serif;background:var(--paper);color:var(--ink);font-size:14px;}
+h1,h2,h3,.display{font-family:'Fraunces',serif;font-weight:600;letter-spacing:-0.01em;}
+.mono{font-family:'JetBrains Mono',monospace;}
+button{font-family:'Inter',sans-serif;cursor:pointer;}
+input,select,textarea{font-family:'Inter',sans-serif;}
+
+.crop{position:relative;}
+.crop .cm{position:absolute;width:10px;height:10px;pointer-events:none;}
+.crop .cm.tl{top:-1px;left:-1px;border-top:1.5px solid var(--kraft);border-left:1.5px solid var(--kraft);}
+.crop .cm.tr{top:-1px;right:-1px;border-top:1.5px solid var(--kraft);border-right:1.5px solid var(--kraft);}
+.crop .cm.bl{bottom:-1px;left:-1px;border-bottom:1.5px solid var(--kraft);border-left:1.5px solid var(--kraft);}
+.crop .cm.br{bottom:-1px;right:-1px;border-bottom:1.5px solid var(--kraft);border-right:1.5px solid var(--kraft);}
+
+#login-screen{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 18% 20%, rgba(43,93,155,0.15), transparent 40%),
+    radial-gradient(circle at 82% 78%, rgba(43,93,155,0.10), transparent 42%), var(--ink);
+}
+.login-box{background:var(--paper-raised);width:380px;padding:44px 40px 36px;text-align:center;}
+.login-box .logo-mark{width:52px;height:52px;margin:0 auto 14px;display:block;object-fit:contain;}
+.login-box .eyebrow{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--kraft);margin-bottom:10px;}
+.login-box h1{font-size:26px;margin:0 0 6px;}
+.login-box p.sub{color:var(--muted);margin:0 0 26px;font-size:13px;}
+.field{margin-bottom:16px;text-align:left;}
+.field label{display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--ink);}
+.field input,.field select,.field textarea{width:100%;padding:10px 12px;border:1px solid var(--line);background:#fff;border-radius:3px;font-size:14px;}
+.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid var(--kraft);outline-offset:1px;border-color:var(--kraft);}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 18px;border-radius:3px;border:1px solid transparent;font-size:13px;font-weight:600;cursor:pointer;}
+.btn-primary{background:var(--kraft);color:#fff;}
+.btn-primary:hover{background:#1E4A7E;}
+.btn-secondary{background:transparent;border-color:var(--line);color:var(--ink);}
+.btn-secondary:hover{border-color:var(--ink);}
+.btn-block{width:100%;}
+.btn-ghost{background:none;border:none;color:var(--muted);font-weight:600;}
+.login-error{color:var(--brick);font-size:12px;margin-top:-6px;margin-bottom:14px;display:none;}
+
+#portal{display:none;}
+#portal.active{display:block;}
+.topbar{background:var(--ink);color:#EDEAE0;padding:16px 32px;display:flex;align-items:center;justify-content:space-between;}
+.topbar .brand{display:flex;align-items:center;gap:10px;}
+.topbar .logo-mark{width:30px;height:30px;object-fit:contain;}
+.topbar .name{font-family:'Fraunces',serif;font-size:17px;font-weight:600;}
+.topbar .tag{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--kraft);}
+.main{max-width:1000px;margin:0 auto;padding:34px 24px 60px;}
+.page-head{margin-bottom:24px;}
+.page-head h1{font-size:24px;margin:0 0 4px;}
+.page-head .sub{color:var(--muted);font-size:13px;}
+
+.quote-card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:22px 24px;margin-bottom:18px;box-shadow:var(--shadow);}
+.quote-card .qhead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:8px;}
+.quote-card h2{font-size:18px;margin:0;}
+.quote-card .qmeta{color:var(--muted);font-size:12.5px;margin-top:2px;}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:var(--kraft-soft);color:var(--kraft);}
+
+.tier-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;}
+.tier{background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:14px 16px;}
+.tier .q{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);}
+.tier .p{font-family:'Fraunces',serif;font-size:20px;font-weight:600;margin-top:4px;}
+.tier .p small{font-size:11px;color:var(--muted);font-weight:400;}
+.tier .t{font-size:12px;color:var(--muted);margin-top:4px;}
+
+.oc-section{background:var(--paper-raised);border:1px solid var(--line);border-radius:8px;padding:22px 24px;margin-top:30px;}
+.oc-section h2{margin:0 0 14px;font-size:18px;}
+.oc-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;}
+.oc-form .full{grid-column:1/-1;}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line);font-weight:600;}
+td{padding:10px 10px;border-bottom:1px solid var(--line);vertical-align:middle;}
+tr:last-child td{border-bottom:none;}
+
+.empty{padding:40px 20px;text-align:center;color:var(--muted);}
+.empty .big{font-size:34px;margin-bottom:10px;}
+.logout{display:flex;align-items:center;gap:12px;}
+.who{font-size:12.5px;color:#C7C3B6;}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:6px;font-size:13px;box-shadow:var(--shadow);z-index:200;display:none;font-weight:500;}
+.toast.show{display:flex;align-items:center;gap:8px;}
+.toast .dot{width:7px;height:7px;border-radius:50%;background:var(--kraft);}
+.oc-line{display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1fr 30px;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:6px;}
+.oc-line .field{margin:0;}
+.oc-line .remove-line{background:none;border:none;color:var(--brick);font-size:18px;line-height:1;padding:6px;cursor:pointer;}
+.pdf-link{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 12px;background:var(--kraft-soft);border-radius:4px;color:var(--kraft);font-size:12px;font-weight:600;text-decoration:none;}
+.pdf-link:hover{background:var(--kraft);color:#fff;}
+.small-note{font-size:11.5px;color:var(--muted);margin-top:6px;}
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-box crop">
+    <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+    <img class="logo-mark" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAC6UlEQVR4nO2aoW4bQRCGJ1WkwDAbJaygjkzyApUVaOLCQKMyB/UpilIWFGhYk8Lq1BcoqeJWCqtJa9gXcMGvrFa3u7Mzu3M+R8qHknPi/N8/e749O0e73Y6eM6/6DlDLi0DfdC5w1zx2+vxH3Z3E337+JaJff/7h2/eT1138lU4EEB04AWCuYSzgRwctAWCoYSYQRgdRAWCiYSCQig4YAVCpUSXARwdZAVCsUf4yKkkvZHh6svr+u+x3Syagii6ZwPD0xH09uzxXhdEJFLSeFfDTO+QaUoHiBVMmACQaeYHKtc4LMOkdvAYnYHKaMgKS9I6URlzA8BXGSgCEGr1NQJs+NYHj6NGLmxURPdzOyHQaZSD6u49fiejzh6vWo3EB0J2GsH4/egpOADiNPY9idnnORwd5AXBxs7IaRbZ+SfEOqQAZrSg+vSo6UAiA7k4M4ZppoRagp/RE9PbNUOWQqr+geIdOANHPru/dkc1yThWjqIkOFAIPtzM/OsARiUar/vroQCQQFt/CaaQcwvT10UFeIFp8lLPr++worIp3cALZ4kOiKwr1m0cH3GZOFT0EGnfNI27YTaJL90KV0f0n2Szn5q37lFwHemEyGiym4/D4MxCYjAbMowf9+cBkNHDpF9Pxpy8/wp85XAG+eMchLqEweqp+OjSBaOtMeqpcQnilN8Ff7irKBZC+3oGPztdPxQJ+7mKH4tZ9+jkHhLmz9VPZBMLKVUMwTE8FAn7W8NaMx2TNtNAJhOmFDtrowvppP1di89Z9FAKpxZMdQrPeqjLJ66eUwGY5b0VJpQ+PmDiELKbj6HY6/wlN/X2Zf0OTXU5h/dHcjvx1AI2a3KPR0yhSGq30fHQgvZCZa/CjkEQHuiuxoUY4CtQvjw4Kr8RW+9DWya1NT/W70Xqa9bZZbwuig6rNnMmKCt/qUWGwGy3WqIwOzLbTKg2T6MD4fiCrYRgddHJDE9Uwjw46/LfL/XC4b2wJeRHom/9OwZ2R/Ev40AAAAABJRU5ErkJggg==" alt="Arqueta Folding">
+    <div class="eyebrow">Portal de clientes</div>
+    <h1>Arqueta Folding</h1>
+    <p class="sub">Consulta tus cotizaciones y sube tus órdenes de compra.</p>
+    <div class="field"><label>Correo</label><input type="text" id="login-email" placeholder="compras@tuempresa.com" autocomplete="username"></div>
+    <div class="field"><label>Contraseña</label><input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"></div>
+    <div class="login-error" id="login-error">Correo o contraseña incorrectos, o tu acceso está inactivo.</div>
+    <button class="btn btn-primary btn-block" onclick="handleLogin()">Entrar</button>
+  </div>
+</div>
+
+<div id="portal">
+  <div class="topbar">
+    <div class="brand">
+      <img class="logo-mark" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAC6UlEQVR4nO2aoW4bQRCGJ1WkwDAbJaygjkzyApUVaOLCQKMyB/UpilIWFGhYk8Lq1BcoqeJWCqtJa9gXcMGvrFa3u7Mzu3M+R8qHknPi/N8/e749O0e73Y6eM6/6DlDLi0DfdC5w1zx2+vxH3Z3E337+JaJff/7h2/eT1138lU4EEB04AWCuYSzgRwctAWCoYSYQRgdRAWCiYSCQig4YAVCpUSXARwdZAVCsUf4yKkkvZHh6svr+u+x3Syagii6ZwPD0xH09uzxXhdEJFLSeFfDTO+QaUoHiBVMmACQaeYHKtc4LMOkdvAYnYHKaMgKS9I6URlzA8BXGSgCEGr1NQJs+NYHj6NGLmxURPdzOyHQaZSD6u49fiejzh6vWo3EB0J2GsH4/egpOADiNPY9idnnORwd5AXBxs7IaRbZ+SfEOqQAZrSg+vSo6UAiA7k4M4ZppoRagp/RE9PbNUOWQqr+geIdOANHPru/dkc1yThWjqIkOFAIPtzM/OsARiUar/vroQCQQFt/CaaQcwvT10UFeIFp8lLPr++worIp3cALZ4kOiKwr1m0cH3GZOFT0EGnfNI27YTaJL90KV0f0n2Szn5q37lFwHemEyGiym4/D4MxCYjAbMowf9+cBkNHDpF9Pxpy8/wp85XAG+eMchLqEweqp+OjSBaOtMeqpcQnilN8Ff7irKBZC+3oGPztdPxQJ+7mKH4tZ9+jkHhLmz9VPZBMLKVUMwTE8FAn7W8NaMx2TNtNAJhOmFDtrowvppP1di89Z9FAKpxZMdQrPeqjLJ66eUwGY5b0VJpQ+PmDiELKbj6HY6/wlN/X2Zf0OTXU5h/dHcjvx1AI2a3KPR0yhSGq30fHQgvZCZa/CjkEQHuiuxoUY4CtQvjw4Kr8RW+9DWya1NT/W70Xqa9bZZbwuig6rNnMmKCt/qUWGwGy3WqIwOzLbTKg2T6MD4fiCrYRgddHJDE9Uwjw46/LfL/XC4b2wJeRHom/9OwZ2R/Ev40AAAAABJRU5ErkJggg==" alt="Arqueta Folding">
+      <div><div class="name">Arqueta Folding</div><div class="tag">Portal de clientes</div></div>
+    </div>
+    <div class="logout">
+      <span class="who" id="who-client"></span>
+      <button class="btn btn-ghost" style="color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
+    </div>
+  </div>
+  <div class="main">
+    <div class="page-head">
+      <h1 id="client-title"></h1>
+      <div class="sub">Precios y cantidades de tus cotizaciones. Sube tus órdenes de compra para que tu ejecutivo las procese.</div>
+    </div>
+    <div id="quotes-container"></div>
+
+    <div class="oc-section crop">
+      <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+      <h2>Subir orden de compra</h2>
+      <div class="oc-form" style="grid-template-columns:1fr 1fr;">
+        <div class="field" style="margin:0;"><label>Número de OC</label><input type="text" id="oc-number" placeholder="OC-001"></div>
+        <div class="field" style="margin:0;"><label>Archivo (PDF/imagen de la OC)</label><input type="file" id="oc-file" accept=".pdf,.png,.jpg,.jpeg"></div>
+      </div>
+      <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Productos en esta orden</div>
+      <div id="oc-lines"></div>
+      <button class="btn btn-secondary" style="margin-bottom:14px;font-size:12px;" onclick="addOCLine()">+ Agregar otro producto</button>
+      <div class="oc-form" style="grid-template-columns:1fr;">
+        <div class="field" style="margin:0;"><label>Notas</label><textarea id="oc-notes" rows="2" placeholder="Material, fecha requerida, etc."></textarea></div>
+      </div>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="submitOC()">Enviar orden de compra</button>
+      <div class="small-note" style="margin-top:10px;">Tu ejecutivo de cuenta recibirá esta orden y te confirmará la producción.</div>
+      <div id="my-ocs" style="margin-top:20px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;" id="oc-filters"></div>
+      <div id="my-ocs-filtered" style="margin-top:12px;"></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
+
+<script>
+function loadData(){
+  const raw = localStorage.getItem('arqueta_db');
+  if(!raw) return {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[]};
+  try{
+    const d = JSON.parse(raw);
+    if(!d.clientOCs) d.clientOCs = [];
+    return d;
+  }catch(e){ return {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[]}; }
+}
+function saveData(db){ localStorage.setItem('arqueta_db', JSON.stringify(db)); }
+let DB = loadData();
+let currentClient = null;
+
+function money(n){
+  if(n===null||n===undefined||isNaN(n)) return '—';
+  return '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+function qty(n){ return Number(n).toLocaleString('es-MX'); }
+function uid(p){ return p+'-'+Math.random().toString(36).slice(2,9); }
+const statusLabel = {vigente:'Vigente', borrador:'En preparación', vencida:'Vencida'};
+
+function showToast(msg){
+  const t=document.getElementById('toast');
+  document.getElementById('toast-text').textContent=msg;
+  t.classList.add('show');
+  clearTimeout(window._tt);
+  window._tt=setTimeout(()=>t.classList.remove('show'),2400);
+}
+
+function handleLogin(){
+  const email = document.getElementById('login-email').value.trim().toLowerCase();
+  const pass = document.getElementById('login-pass').value;
+  const client = DB.clients.find(c => c.portal_active && c.portal_email && c.portal_email.toLowerCase()===email && c.portal_password===pass);
+  if(client){
+    sessionStorage.setItem('arqueta_portal_client', client.id);
+    currentClient = client;
+    showPortal(client);
+  } else {
+    document.getElementById('login-error').style.display='block';
+  }
+}
+function handleLogout(){
+  sessionStorage.removeItem('arqueta_portal_client');
+  currentClient = null;
+  document.getElementById('portal').classList.remove('active');
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('login-email').value=''; document.getElementById('login-pass').value='';
+}
+document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
+
+function showPortal(client){
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('portal').classList.add('active');
+  document.getElementById('client-title').textContent = client.name;
+  document.getElementById('who-client').textContent = client.portal_email;
+
+  const quotes = DB.quotes.filter(q=>q.client_id===client.id);
+  const wrap = document.getElementById('quotes-container');
+  if(!quotes.length){
+    wrap.innerHTML = '<div class="empty"><div class="big">—</div>Aún no tienes cotizaciones registradas.</div>';
+  } else {
+    wrap.innerHTML = quotes.map(q=>{
+      const tiers = DB.costBreakdown.filter(r=>r.quote_id===q.id).sort((a,b)=>a.quantity_tier-b.quantity_tier);
+      const pdfLink = (q.pdfName && q.pdfData) ? '<a class="pdf-link" href="'+q.pdfData+'" download="'+q.pdfName+'">📄 Descargar cotización PDF</a>' : '';
+      let html = '<div class="tier-grid">'+tiers.map(t=>
+          '<div class="tier"><div class="q">'+qty(t.quantity_tier)+' pza</div>'+
+          '<div class="p">'+money(t.valor_venta_total/t.quantity_tier)+'<small> /pza</small></div>'+
+          '<div class="t">Total: '+money(t.valor_venta_total)+'</div></div>'
+        ).join('')+'</div>'+pdfLink;
+      // Add characteristics if available
+      const charFields = [['Sustrato',q.sustrato],['Calibre',q.calibre],['Gramaje',q.gramaje],['Tintas',q.tintas],['Barniz',q.barniz],['Acabado',q.acabado_spec],['Realces',q.realces],['Entrega',q.entrega],['Lugar de entrega',q.lugar_entrega]].filter(([k,v])=>v);
+      if(charFields.length){
+        html += '<div style="margin-top:12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:6px 16px;">';
+        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:6px 0;">Características</div>';
+        html += charFields.map(([k,v])=>'<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--line);font-size:12.5px;"><span style="color:var(--muted);">'+k+'</span><span style="font-weight:600;">'+v+'</span></div>').join('');
+        html += '</div>';
+      }
+      return '<div class="quote-card crop"><div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>'+
+        '<div class="qhead"><div><h2>'+q.product_name+(q.version?' <span style="font-size:13px;color:var(--muted);font-weight:400;">'+q.version+'</span>':'')+'</h2><div class="qmeta mono">'+q.quote_number+' &middot; '+(q.date||'')+'</div></div>'+
+        '<span class="badge">'+(statusLabel[q.status]||q.status)+'</span></div>'+html+'</div>';
+    }).join('');
+  }
+
+  // Initialize OC lines with 3 empty rows
+  document.getElementById('oc-lines').innerHTML = '';
+  for(let i=0;i<3;i++) addOCLine();
+
+  renderMyOCs(client);
+}
+
+function addOCLine(){
+  const wrap = document.getElementById('oc-lines');
+  const div = document.createElement('div');
+  div.className = 'oc-line';
+  const lineId = 'ol-'+Math.random().toString(36).slice(2,7);
+  div.innerHTML = '<div class="field"><label>Código</label><input type="text" class="ol-codigo" placeholder="SKU-001"></div>'+
+    '<div class="field"><label>Producto</label><input type="text" class="ol-product" placeholder="NOMBRE_PRODUCTO"></div>'+
+    '<div class="field"><label>Cantidad (pza)</label><input type="number" class="ol-qty" placeholder="25000" oninput="calcLineTotal(this)"></div>'+
+    '<div class="field"><label>Precio unitario sin impuesto</label><input type="number" step="0.01" class="ol-price" placeholder="1.00" oninput="calcLineTotal(this)"></div>'+
+    '<div class="field"><label>Valor total sin impuesto</label><div class="ol-total" style="padding:10px 0;font-weight:600;font-family:\'JetBrains Mono\',monospace;font-size:13px;">$0.00</div></div>'+
+    '<button class="remove-line" onclick="this.parentElement.remove()" title="Quitar línea">✕</button>';
+  wrap.appendChild(div);
+}
+function calcLineTotal(input){
+  const line = input.closest('.oc-line');
+  const q = Number(line.querySelector('.ol-qty').value)||0;
+  const p = Number(line.querySelector('.ol-price').value)||0;
+  const total = q*p;
+  line.querySelector('.ol-total').textContent = '$'+total.toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function submitOC(){
+  if(!currentClient) return;
+  const ocNumber = document.getElementById('oc-number').value.trim();
+  const notes = document.getElementById('oc-notes').value.trim();
+  const fileInput = document.getElementById('oc-file');
+
+  // Collect line items
+  const lines = Array.from(document.querySelectorAll('.oc-line')).map(el=>({
+    codigo: (el.querySelector('.ol-codigo').value||'').trim(),
+    product: (el.querySelector('.ol-product').value||'').trim(),
+    quantity: Number(el.querySelector('.ol-qty').value)||0,
+    unit_price: Number(el.querySelector('.ol-price').value)||0
+  })).filter(l=>l.product && l.quantity>0);
+
+  if(!ocNumber){ showToast('Escribe el número de OC'); return; }
+  if(!lines.length){ showToast('Agrega al menos un producto con nombre y cantidad'); return; }
+
+  const finish = (fileName, fileData) => {
+    DB = loadData();
+    if(!DB.clientOCs) DB.clientOCs = [];
+    DB.clientOCs.push({
+      id: uid('coc'),
+      client_id: currentClient.id,
+      oc_number: ocNumber,
+      lines: lines,
+      notes: notes,
+      fileName: fileName||'',
+      fileData: fileData||'',
+      date_submitted: new Date().toISOString().slice(0,10),
+      status: 'pendiente'
+    });
+    saveData(DB);
+    document.getElementById('oc-number').value='';
+    document.getElementById('oc-notes').value='';
+    fileInput.value='';
+    document.getElementById('oc-lines').innerHTML='';
+    for(let i=0;i<3;i++) addOCLine();
+    renderMyOCs(currentClient);
+    showToast('Orden de compra enviada');
+    // Send email notification to daniel.vonderwalde@arquetaf.com
+    notifyNewOC(ocNumber, lines, currentClient.name);
+  };
+
+  if(fileInput.files[0]){
+    const reader = new FileReader();
+    reader.onload = e => finish(fileInput.files[0].name, e.target.result);
+    reader.readAsDataURL(fileInput.files[0]);
+  } else {
+    finish('','');
+  }
+}
+
+let ocFilterDays = 0; // 0 = all
+function setOCFilter(days){ ocFilterDays=days; if(currentClient) renderMyOCs(currentClient); }
+
+function renderMyOCs(client){
+  const allOcs = (DB.clientOCs||[]).filter(o=>o.client_id===client.id).sort((a,b)=>(b.date_submitted||'').localeCompare(a.date_submitted||''));
+  const wrap = document.getElementById('my-ocs');
+  if(!allOcs.length){ wrap.innerHTML=''; document.getElementById('oc-filters').innerHTML=''; document.getElementById('my-ocs-filtered').innerHTML=''; return; }
+
+  // Filter pills
+  const pills = [[0,'Todas'],[30,'30 días'],[90,'90 días'],[120,'120 días'],[180,'180 días']];
+  document.getElementById('oc-filters').innerHTML = pills.map(([d,l])=>
+    '<button class="btn '+(ocFilterDays===d?'btn-primary':'btn-secondary')+'" style="font-size:11px;padding:5px 12px;" onclick="setOCFilter('+d+')">'+l+'</button>'
+  ).join('');
+
+  let ocs = allOcs;
+  if(ocFilterDays>0){
+    const cutoff = new Date(new Date() - ocFilterDays*86400000).toISOString().slice(0,10);
+    ocs = allOcs.filter(o=>o.date_submitted>=cutoff);
+  }
+
+  // Group by status
+  const groups = {pendiente:[], recibida:[], rechazada:[]};
+  ocs.forEach(o=>{ (groups[o.status]||groups.pendiente).push(o); });
+  const statusLabels = {pendiente:'Pendientes', recibida:'Aceptadas', rechazada:'Rechazadas'};
+  const statusColors = {pendiente:'var(--kraft)', recibida:'var(--teal)', rechazada:'#A63A3A'};
+
+  let html = '<h3 style="margin-top:0;">Mis órdenes ('+ocs.length+')</h3>';
+  for(const [status, list] of Object.entries(groups)){
+    if(!list.length) continue;
+    html += '<div style="margin-bottom:18px;"><div style="font-weight:700;font-size:13px;color:'+statusColors[status]+';margin-bottom:8px;">'+statusLabels[status]+' ('+list.length+')</div>';
+    html += '<table><thead><tr><th>OC</th><th>Código</th><th>Producto</th><th>Cantidad</th><th>P. Unit. sin imp.</th><th>Valor Total sin imp.</th><th>Fecha</th><th>Archivo</th></tr></thead><tbody>';
+    list.forEach(o=>{
+      const lines = o.lines || [{product:'—', quantity:0, unit_price:0}];
+      const subtotal = lines.reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0);
+      const iva = subtotal*0.16;
+      lines.forEach((l,i)=>{
+        const total = (l.quantity||0)*(l.unit_price||0);
+        html += '<tr><td class="mono">'+(i===0?o.oc_number:'')+'</td><td class="mono" style="font-size:11px;">'+(l.codigo||'')+'</td><td>'+l.product+'</td><td style="text-align:right;">'+qty(l.quantity)+'</td><td style="text-align:right;">'+money(l.unit_price)+'</td><td style="text-align:right;font-weight:600;">'+money(total)+'</td><td>'+(i===0?(o.date_submitted||'—'):'')+'</td><td>'+(i===0&&o.fileName?'<a href="'+o.fileData+'" download="'+o.fileName+'" style="color:var(--kraft);font-size:11px;">'+o.fileName+'</a>':'')+'</td></tr>';
+      });
+      html += '<tr style="font-size:12px;"><td colspan="4"></td><td style="text-align:right;color:var(--muted);">Subtotal</td><td style="text-align:right;font-weight:600;">'+money(subtotal)+'</td><td colspan="2"></td></tr>';
+      html += '<tr style="font-size:12px;"><td colspan="4"></td><td style="text-align:right;color:var(--muted);">IVA 16%</td><td style="text-align:right;">'+money(iva)+'</td><td colspan="2"></td></tr>';
+      html += '<tr style="font-size:13px;"><td colspan="4"></td><td style="text-align:right;font-weight:700;">Total con IVA</td><td style="text-align:right;font-weight:700;">'+money(subtotal+iva)+'</td><td colspan="2"></td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  wrap.innerHTML = html;
+}
+
+function notifyNewOC(ocNumber, lines, clientName){
+  const emails = (DB.notifEmails && DB.notifEmails.length) ? DB.notifEmails : ['daniel.vonderwalde@arquetaf.com'];
+  const linesText = lines.map(l=>l.product+' — '+l.quantity+' pza × $'+l.unit_price).join('\n');
+  const subject = encodeURIComponent('Nueva orden de compra de '+clientName+' — OC '+ocNumber);
+  const body = encodeURIComponent('Hola,\n\nTienes una nueva orden de compra:\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+'\n\nProductos:\n'+linesText+'\n\nRevísala en el panel de administración:\n'+window.location.href.replace('portal_cliente','admin')+'\n\nSaludos,\nPortal Arqueta Folding');
+  const to = emails.join(',');
+  const mailto = 'mailto:'+to+'?subject='+subject+'&body='+body;
+  window.open(mailto, '_blank');
+}
+
+window.addEventListener('DOMContentLoaded', ()=>{
+  const savedId = sessionStorage.getItem('arqueta_portal_client');
+  if(savedId){
+    const client = DB.clients.find(c=>c.id===savedId && c.portal_active);
+    if(client){ currentClient=client; showPortal(client); }
+  }
+});
+</script>
+</body>
+</html>
