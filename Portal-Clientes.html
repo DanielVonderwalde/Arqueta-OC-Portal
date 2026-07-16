@@ -212,15 +212,24 @@ function showToast(msg){
   window._tt=setTimeout(()=>t.classList.remove('show'),2400);
 }
 
+let firebaseLoaded = false;
 function handleLogin(){
+  if(!firebaseLoaded){
+    document.getElementById('login-error').textContent = 'Cargando datos, espera un momento...';
+    document.getElementById('login-error').style.display='block';
+    return;
+  }
   const email = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
+  console.log('Login attempt:', email, '| Clients in DB:', DB.clients.length);
+  console.log('Active clients:', DB.clients.filter(c=>c.portal_active).map(c=>c.portal_email));
   const client = DB.clients.find(c => c.portal_active && c.portal_email && c.portal_email.toLowerCase()===email && c.portal_password===pass);
   if(client){
     sessionStorage.setItem('arqueta_portal_client', client.id);
     currentClient = client;
     showPortal(client);
   } else {
+    document.getElementById('login-error').textContent = 'Correo o contraseña incorrectos, o tu acceso está inactivo.';
     document.getElementById('login-error').style.display='block';
   }
 }
@@ -456,8 +465,9 @@ window.addEventListener('DOMContentLoaded', async ()=>{
       if(!DB.clientOCs) DB.clientOCs = [];
       if(!DB.notifEmails) DB.notifEmails = [];
       console.log('Firebase loaded, clients:', DB.clients.length);
+      firebaseLoaded = true;
     }
-  }catch(e){ console.error('Firebase load error:',e); }
+  }catch(e){ console.error('Firebase load error:',e); firebaseLoaded = true; }
 
   const savedId = sessionStorage.getItem('arqueta_portal_client');
   if(savedId){
