@@ -1115,7 +1115,6 @@ function openQuoteModal(prefillClientId){
   document.getElementById('mq-pdf-autofill').value='';
   pendingPdfFile = null;
   document.getElementById('mq-tiers').innerHTML='';
-  applyStandardTiers();
   document.getElementById('modal-quote').classList.add('active');
 }
 
@@ -1292,10 +1291,10 @@ async function handlePDFAutofill(input){
     });
 
     if(ex.tiers.length){
+      // Clear any existing tiers and add ONLY what the PDF contains
+      document.getElementById('mq-tiers').innerHTML='';
       ex.tiers.forEach(t=>{
-        const el = findTierRowElByQty(t.quantity_tier);
-        if(el) setTierField(el, 't-venta', t.valor_venta_total);
-        else addTierRow({quantity_tier:t.quantity_tier, sustrato:'', acabado:'', materiales:'', mod:'', ee:'', extras:'', transporte:'', valor_venta_total:t.valor_venta_total, blended:true});
+        addTierRow({quantity_tier:t.quantity_tier, sustrato:'', acabado:'', materiales:'', mod:'', ee:'', extras:'', transporte:'', valor_venta_total:t.valor_venta_total, blended:true});
       });
       statusEl.textContent = `${ex.tiers.length} nivel(es) de cantidad y precio cargados del PDF. Ahora sube el Excel para completar el desglose de costo.`;
     } else {
