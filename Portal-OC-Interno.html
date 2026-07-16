@@ -429,21 +429,14 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <!-- ===== ORDENES ===== -->
     <div class="view" id="view-ordenes">
       <div class="page-head">
-        <div><h1>Órdenes de compra</h1><div class="sub">Registro y verificación de cantidades contra lo cotizado</div></div>
+        <div><h1>Órdenes de compra</h1><div class="sub">Registro y verificación de órdenes de compra</div></div>
         <button class="btn btn-primary" onclick="openPOModal()">+ Registrar orden</button>
       </div>
+
       <div class="card crop" style="padding:0;">
         <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
-        <table style="padding:6px;">
-          <thead><tr><th>OC</th><th>Cliente</th><th>Cotización</th><th>Cantidad</th><th>Material</th><th>Coincide</th><th>Estado</th><th></th></tr></thead>
-          <tbody id="po-list-body"></tbody>
-        </table>
-      </div>
-
-      <div class="card crop" style="padding:0;margin-top:20px;">
-        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
         <div style="padding:18px 20px 0;">
-          <h2 style="margin:0;">Órdenes enviadas por clientes (portal)</h2>
+          <h2 style="margin:0;">Todas las órdenes de compra</h2>
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
             <select id="oc-filter-client" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;"><option value="">Todos los clientes</option></select>
             <select id="oc-filter-status" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
@@ -1677,7 +1670,6 @@ function clearFile(kind){
    ========================================================= */
 function openPOModal(){
   populateClientSelect('mp-client');
-  refreshPOQuoteOptions();
   document.getElementById('mp-number').value='';
   document.getElementById('mp-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('mp-notes').value='';
@@ -1746,19 +1738,6 @@ function poMatches(po){
   return tiers.some(t=>t.quantity_tier===po.quantity_ordered);
 }
 function renderPOList(){
-  document.getElementById('po-list-body').innerHTML = DB.purchaseOrders.length ? DB.purchaseOrders.map(po=>{
-    const cl = clientById(po.client_id); const q = quoteById(po.quote_id);
-    const match = poMatches(po);
-    return `<tr>
-      <td class="mono">${po.po_number}</td><td>${cl?cl.name:'—'}</td><td class="mono">${q?q.quote_number:'—'}</td>
-      <td>${qty(po.quantity_ordered)} pza</td><td>${po.material_specified||'—'}</td>
-      <td>${match ? '<span class="badge badge-match-yes">Sí</span>' : '<span class="badge badge-match-no">No coincide</span>'}</td>
-      <td style="text-transform:capitalize;">${po.status}</td>
-      <td style="text-align:right;"><button class="btn btn-ghost" style="color:var(--brick);" onclick="deletePO('${po.id}')">Eliminar</button></td>
-    </tr>`;
-  }).join('') : `<tr><td colspan="8" class="empty"><div class="big">—</div>Sin órdenes de compra registradas</td></tr>`;
-
-  // Client-submitted OCs — filtered and grouped by client
   // Populate client filter dropdown
   const ocClientSel = document.getElementById('oc-filter-client');
   const currentVal = ocClientSel.value;
