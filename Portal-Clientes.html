@@ -175,7 +175,13 @@ const fbRef = firebase.database().ref('arqueta_db');
 let DB = {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[], notifEmails:[]};
 let currentClient = null;
 
-function saveData(){ fbRef.set(DB).catch(e=>console.error('Firebase write error:',e)); }
+function saveData(){
+  // Strip file data — too heavy for Firebase
+  const lite = JSON.parse(JSON.stringify(DB));
+  (lite.quotes||[]).forEach(q=>{ if(q.pdfData&&q.pdfData.length>100) q.pdfData=''; if(q.excelData&&q.excelData.length>100) q.excelData=''; if(q.excelInsertoData&&q.excelInsertoData.length>100) q.excelInsertoData=''; });
+  (lite.clientOCs||[]).forEach(o=>{ if(o.fileData&&o.fileData.length>100) o.fileData=''; });
+  fbRef.set(lite).catch(e=>console.error('Firebase write error:',e));
+}
 
 function money(n){
   if(n===null||n===undefined||isNaN(n)) return '—';
