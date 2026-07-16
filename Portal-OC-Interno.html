@@ -612,6 +612,20 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 
 <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyBH2ykaKrIFOQorRBXHIocrau5JFe-BxMk",
+  authDomain: "arqueta-portal.firebaseapp.com",
+  databaseURL: "https://arqueta-portal-default-rtdb.firebaseio.com",
+  projectId: "arqueta-portal",
+  storageBucket: "arqueta-portal.firebasestorage.app",
+  messagingSenderId: "368467802357",
+  appId: "1:368467802357:web:7b8b1fa2ca121dfe2fedbc"
+});
+const fbRef = firebase.database().ref('arqueta_db');
+</script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.min.js"></script>
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.worker.min.js';</script>
@@ -655,36 +669,63 @@ function seedData(){
   };
 }
 
-function loadData(){
-  const raw = localStorage.getItem('arqueta_db');
-  if(!raw){ const seed = seedData(); localStorage.setItem('arqueta_db', JSON.stringify(seed)); return seed; }
-  try{ return JSON.parse(raw); }catch(e){ const seed = seedData(); localStorage.setItem('arqueta_db', JSON.stringify(seed)); return seed; }
-}
-function saveData(){ localStorage.setItem('arqueta_db', JSON.stringify(DB)); }
-let DB = loadData();
-// Data version — increment this to force re-seed
-const DATA_VERSION = 2;
-(function migrateData(){
-  if(!DB._version || DB._version < DATA_VERSION){
-    // Force fresh seed to pick up all new fields (margen, notifEmails, etc.)
-    const seed = seedData();
-    seed._version = DATA_VERSION;
-    // Preserve any user-added clients, quotes, costBreakdowns, OCs that aren't in the seed
-    const seedQuoteIds = new Set(seed.quotes.map(q=>q.id));
-    const seedClientIds = new Set(seed.clients.map(c=>c.id));
-    DB.clients.forEach(c=>{ if(!seedClientIds.has(c.id)) seed.clients.push(c); });
-    DB.quotes.forEach(q=>{ if(!seedQuoteIds.has(q.id)) seed.quotes.push(q); });
-    DB.costBreakdown.forEach(r=>{
-      if(!seedQuoteIds.has(r.quote_id)) seed.costBreakdown.push(r);
+function saveData(){ fbRef.set(DB).catch(e=>console.error('Firebase write error:',e)); }
+let DB = seedData();
+const DATA_VERSION = 3;
+let firebaseReady = false;
+
+// Initialize from Firebase — async
+async function initFirebase(){
+  try{
+    const snapshot = await fbRef.once('value');
+    let data = snapshot.val();
+    if(!data || !data._version || data._version < DATA_VERSION){
+      const seed = seedData();
+      seed._version = DATA_VERSION;
+      if(data){
+        const seedQIds = new Set(seed.quotes.map(q=>q.id));
+        const seedCIds = new Set(seed.clients.map(c=>c.id));
+        (data.clients||[]).forEach(c=>{ if(!seedCIds.has(c.id)) seed.clients.push(c); });
+        (data.quotes||[]).forEach(q=>{ if(!seedQIds.has(q.id)) seed.quotes.push(q); });
+        (data.costBreakdown||[]).forEach(r=>{ if(!seedQIds.has(r.quote_id)) seed.costBreakdown.push(r); });
+        seed.purchaseOrders = data.purchaseOrders || [];
+        seed.clientOCs = data.clientOCs || [];
+        seed.notifEmails = data.notifEmails || seed.notifEmails;
+      }
+      await fbRef.set(seed);
+      DB = seed;
+    } else {
+      DB = data;
+    }
+    if(!DB.clientOCs) DB.clientOCs = [];
+    if(!DB.notifEmails) DB.notifEmails = ['daniel.vonderwalde@arquetaf.com'];
+    if(!DB.purchaseOrders) DB.purchaseOrders = [];
+    firebaseReady = true;
+    console.log('Firebase loaded, version', DB._version);
+    renderAll();
+
+    // Real-time listener — updates from other devices
+    fbRef.on('value', snap=>{
+      const d = snap.val();
+      if(d){
+        DB = d;
+        if(!DB.clientOCs) DB.clientOCs = [];
+        if(!DB.notifEmails) DB.notifEmails = ['daniel.vonderwalde@arquetaf.com'];
+        if(!DB.purchaseOrders) DB.purchaseOrders = [];
+        renderAll();
+        if(currentQuoteId) openQuoteDetail(currentQuoteId);
+        console.log('Firebase sync update received');
+      }
     });
-    seed.purchaseOrders = DB.purchaseOrders || [];
-    seed.clientOCs = DB.clientOCs || [];
-    seed.notifEmails = DB.notifEmails || seed.notifEmails;
-    DB = seed;
-    localStorage.setItem('arqueta_db', JSON.stringify(DB));
-    console.log('Data migrated to version', DATA_VERSION);
+  }catch(e){
+    console.error('Firebase init error:',e);
+    // Fallback to localStorage
+    const raw = localStorage.getItem('arqueta_db');
+    DB = raw ? JSON.parse(raw) : seedData();
+    firebaseReady = true;
+    renderAll();
   }
-})();
+}
 
 let currentClientId = null;
 let currentQuoteId = null;
@@ -764,8 +805,9 @@ function handleLogout(){
   document.getElementById('login-pass').value='';
 }
 document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
-window.addEventListener('DOMContentLoaded', ()=>{
+window.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  await initFirebase();
   if(sessionStorage.getItem('arqueta_admin_session')){
     currentRole = sessionStorage.getItem('arqueta_admin_session');
     document.getElementById('login-screen').style.display='none';
