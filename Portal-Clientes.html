@@ -314,7 +314,7 @@ function submitOC(){
     renderMyOCs(currentClient);
     showToast('Orden de compra enviada');
     // Send email notification to daniel.vonderwalde@arquetaf.com
-    notifyNewOC(ocNumber, lines, currentClient.name);
+    notifyNewOC(ocNumber, lines, currentClient.name, fileData, fileName);
   };
 
   if(fileInput.files[0]){
@@ -374,14 +374,44 @@ function renderMyOCs(client){
   wrap.innerHTML = html;
 }
 
-function notifyNewOC(ocNumber, lines, clientName){
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+// EmailJS config — fill these in from emailjs.com dashboard
+const EMAILJS_PUBLIC_KEY = ''; // tu Public Key de EmailJS
+const EMAILJS_SERVICE_ID = ''; // tu Service ID
+const EMAILJS_TEMPLATE_ID = ''; // tu Template ID
+
+if(EMAILJS_PUBLIC_KEY) emailjs.init(EMAILJS_PUBLIC_KEY);
+</script>
+<script>
+
+function notifyNewOC(ocNumber, lines, clientName, fileData, fileName){
   const emails = (DB.notifEmails && DB.notifEmails.length) ? DB.notifEmails : ['daniel.vonderwalde@arquetaf.com'];
-  const linesText = lines.map(l=>l.product+' — '+l.quantity+' pza × $'+l.unit_price).join('\n');
-  const subject = encodeURIComponent('Nueva orden de compra de '+clientName+' — OC '+ocNumber);
-  const body = encodeURIComponent('Hola,\n\nTienes una nueva orden de compra:\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+'\n\nProductos:\n'+linesText+'\n\nRevísala en el panel de administración:\n'+window.location.href.replace('portal_cliente','admin')+'\n\nSaludos,\nPortal Arqueta Folding');
-  const to = emails.join(',');
-  const mailto = 'mailto:'+to+'?subject='+subject+'&body='+body;
-  window.open(mailto, '_blank');
+  const linesHtml = lines.map(l=>{
+    const total = (l.quantity||0)*(l.unit_price||0);
+    return (l.codigo?l.codigo+' — ':'')+l.product+' — '+l.quantity+' pza × $'+l.unit_price+' = $'+total.toLocaleString('es-MX',{minimumFractionDigits:2});
+  }).join('\n');
+  const portalUrl = window.location.href.replace('Portal-Clientes','Portal-OC-Interno').replace('portal','admin');
+
+  if(EMAILJS_PUBLIC_KEY && EMAILJS_SERVICE_ID && EMAILJS_TEMPLATE_ID){
+    // Auto-send via EmailJS
+    const params = {
+      to_email: emails.join(','),
+      subject: 'Nueva orden de compra de '+clientName+' — OC '+ocNumber,
+      message: 'Hola,\n\nTienes una nueva orden de compra:\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+'\n\nProductos:\n'+linesHtml+'\n\nRevísala aquí: '+portalUrl+'\n\nSaludos,\nPortal Arqueta Folding'
+    };
+    emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params)
+      .then(()=> console.log('Email sent via EmailJS'))
+      .catch(e=> { console.error('EmailJS error:',e); fallbackMailto(); });
+  } else {
+    fallbackMailto();
+  }
+
+  function fallbackMailto(){
+    const subject = encodeURIComponent('Nueva orden de compra de '+clientName+' — OC '+ocNumber);
+    const body = encodeURIComponent('Hola,\n\nTienes una nueva orden de compra:\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+'\n\nProductos:\n'+linesHtml+'\n\nRevísala aquí: '+portalUrl+'\n\nSaludos,\nPortal Arqueta Folding');
+    window.open('mailto:'+emails.join(',')+('?subject='+subject+'&body='+body), '_blank');
+  }
 }
 
 window.addEventListener('DOMContentLoaded', async ()=>{
