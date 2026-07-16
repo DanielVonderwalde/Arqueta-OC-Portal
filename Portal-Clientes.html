@@ -158,6 +158,13 @@ tr:last-child td{border-bottom:none;}
 
 <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+const EMAILJS_PUBLIC_KEY = 'AmLx1hP2EUC36ywmw';
+const EMAILJS_SERVICE_ID = 'service_3yowdak';
+const EMAILJS_TEMPLATE_ID = 'template_efggngv';
+if(EMAILJS_PUBLIC_KEY) emailjs.init(EMAILJS_PUBLIC_KEY);
+</script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script>
@@ -402,16 +409,6 @@ function renderMyOCs(client){
   wrap.innerHTML = html;
 }
 
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-<script>
-// EmailJS config
-const EMAILJS_PUBLIC_KEY = 'AmLx1hP2EUC36ywmw'; // PEGA TU PUBLIC KEY AQUÍ
-const EMAILJS_SERVICE_ID = 'service_3yowdak';
-const EMAILJS_TEMPLATE_ID = 'template_efggngv'; // PEGA TU TEMPLATE ID AQUÍ
-
-if(EMAILJS_PUBLIC_KEY) emailjs.init(EMAILJS_PUBLIC_KEY);
-</script>
-<script>
 
 function notifyNewOC(ocNumber, lines, clientName, fileData, fileName){
   const emails = (DB.notifEmails && DB.notifEmails.length) ? DB.notifEmails : ['daniel.vonderwalde@arquetaf.com'];
