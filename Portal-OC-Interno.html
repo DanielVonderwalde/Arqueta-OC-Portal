@@ -244,15 +244,11 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <p class="sub">Cotizaciones, costos y órdenes de compra — folding cartons.</p>
     <div class="field">
       <label>Usuario</label>
-      <input type="text" id="login-user" placeholder="admin" autocomplete="username">
+      <input type="text" id="login-user" placeholder="admin / asociado" autocomplete="username">
     </div>
-    <div class="field">
-      <label>Contraseña</label>
-      <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password">
-    </div>
-    <div class="login-error" id="login-error">Usuario o contraseña incorrectos.</div>
+    <div class="login-error" id="login-error">Usuario no reconocido.</div>
     <button class="btn btn-primary btn-block" onclick="handleLogin()">Entrar</button>
-    <div class="login-hint">admin / asociado — arqueta2026</div>
+    <div class="login-hint">Usuarios: admin · asociado</div>
   </div>
 </div>
 
@@ -418,8 +414,12 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <div class="zone-label"><span class="dot"></span> Solo uso interno</div>
         <div id="qd-cost-tiers"></div>
         <hr class="hr">
-        <h3 style="margin-bottom:8px;">Excel de costos (interno)</h3>
+        <h3 style="margin-bottom:8px;">Excel de costos — Caja (interno)</h3>
         <div id="qd-excel-upload"></div>
+        <div id="qd-inserto-section" style="display:none;margin-top:14px;">
+          <h3 style="margin-bottom:8px;">Excel de costos — Inserto (interno)</h3>
+          <div id="qd-excel-inserto-upload"></div>
+        </div>
       </div>
     </div>
 
@@ -544,6 +544,9 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     </div>
     <div class="formrow">
       <div class="field"><label>Versión</label><input type="text" id="mq-version" placeholder="V1"></div>
+      <div class="field"><label style="display:block;">¿Tiene inserto?</label>
+        <label class="pw-toggle" style="margin-top:8px;"><input type="checkbox" id="mq-inserto" onchange="toggleInserto()"> Sí, esta cotización incluye inserto</label>
+      </div>
     </div>
     <div class="formrow">
       <div class="field"><label>Fecha</label><input type="date" id="mq-date"></div>
@@ -775,8 +778,7 @@ function statusBadge(status){
    ========================================================= */
 function handleLogin(){
   const u = document.getElementById('login-user').value.trim();
-  const p = document.getElementById('login-pass').value;
-  const found = USERS.find(x=>x.user===u && x.pass===p);
+  const found = USERS.find(x=>x.user===u);
   if(found){
     currentRole = found.role;
     document.getElementById('login-screen').style.display='none';
@@ -804,7 +806,7 @@ function handleLogout(){
   document.getElementById('login-user').value='';
   document.getElementById('login-pass').value='';
 }
-document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
+document.getElementById('login-user').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
 window.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{weekday:'long', year:'numeric', month:'long', day:'numeric'});
   await initFirebase();
@@ -1038,6 +1040,7 @@ function openQuoteModal(prefillClientId){
   document.getElementById('mq-product').value='';
   document.getElementById('mq-reference').value='';
   document.getElementById('mq-version').value='';
+  document.getElementById('mq-inserto').checked=false;
   document.getElementById('mq-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('mq-status').value='borrador';
   document.getElementById('mq-sustrato').value='';
@@ -1069,6 +1072,7 @@ function editCurrentQuoteMeta(){
   document.getElementById('mq-product').value=q.product_name;
   document.getElementById('mq-reference').value=q.reference||'';
   document.getElementById('mq-version').value=q.version||'';
+  document.getElementById('mq-inserto').checked=!!q.has_inserto;
   document.getElementById('mq-date').value=q.date||'';
   document.getElementById('mq-status').value=q.status;
   document.getElementById('mq-sustrato').value=q.sustrato||'';
@@ -1124,6 +1128,8 @@ function addTierRow(data){
   `;
   document.getElementById('mq-tiers').appendChild(wrap);
 }
+function toggleInserto(){}
+
 function applyStandardTiers(){
   document.getElementById('mq-tiers').innerHTML='';
   STANDARD_TIERS.forEach(q=> addTierRow({quantity_tier:q, sustrato:'', acabado:'', materiales:'', mod:'', ee:'', extras:'', transporte:'', valor_venta_total:'', blended:false}));
@@ -1407,7 +1413,8 @@ function saveQuote(){
     realces: document.getElementById('mq-realces').value.trim(),
     entrega: document.getElementById('mq-entrega').value.trim(),
     lugar_entrega: document.getElementById('mq-lugar-entrega').value.trim(),
-    version: document.getElementById('mq-version').value.trim()
+    version: document.getElementById('mq-version').value.trim(),
+    has_inserto: document.getElementById('mq-inserto').checked
   };
 
   const tierRows = Array.from(document.getElementById('mq-tiers').children).map(el=>({
@@ -1535,6 +1542,13 @@ function openQuoteDetail(id){
   }).join('') || `<div class="empty">Sin desglose de costos</div>`;
 
   document.getElementById('qd-excel-upload').innerHTML = fileUploadHTML('excel', q.excelName, q.excelData);
+  const insertoSection = document.getElementById('qd-inserto-section');
+  if(q.has_inserto){
+    insertoSection.style.display = '';
+    document.getElementById('qd-excel-inserto-upload').innerHTML = fileUploadHTML('excel_inserto', q.excelInsertoName, q.excelInsertoData);
+  } else {
+    insertoSection.style.display = 'none';
+  }
 
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-quote-detail').classList.add('active');
@@ -1576,6 +1590,7 @@ function handleFileUpload(input, kind){
   const reader = new FileReader();
   reader.onload = function(e){
     if(kind==='pdf'){ q.pdfName=file.name; q.pdfData=e.target.result; }
+    else if(kind==='excel_inserto'){ q.excelInsertoName=file.name; q.excelInsertoData=e.target.result; }
     else { q.excelName=file.name; q.excelData=e.target.result; }
     saveData(); openQuoteDetail(currentQuoteId);
     showToast('Archivo cargado: '+file.name);
@@ -1584,7 +1599,9 @@ function handleFileUpload(input, kind){
 }
 function clearFile(kind){
   const q = quoteById(currentQuoteId);
-  if(kind==='pdf'){ q.pdfName=''; q.pdfData=''; } else { q.excelName=''; q.excelData=''; }
+  if(kind==='pdf'){ q.pdfName=''; q.pdfData=''; }
+  else if(kind==='excel_inserto'){ q.excelInsertoName=''; q.excelInsertoData=''; }
+  else { q.excelName=''; q.excelData=''; }
   saveData(); openQuoteDetail(currentQuoteId);
 }
 
