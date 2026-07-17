@@ -365,10 +365,20 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <h2 style="margin:0;">Tendencia de ingresos y OCs</h2>
-          <div style="display:flex;gap:4px;" id="trend-granularity">
-            <button class="btn btn-primary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('monthly')">Mensual</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('weekly')">Semanal</button>
-            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('daily')">Diario</button>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <div style="display:flex;gap:4px;align-items:center;">
+              <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Alcance:</span>
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendScope(90)">3M</button>
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendScope(180)">6M</button>
+              <button class="btn btn-primary" style="font-size:11px;padding:4px 10px;" onclick="setTrendScope(365)">1 Año</button>
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendScope(0)">Todo</button>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center;" id="trend-granularity">
+              <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Detalle:</span>
+              <button class="btn btn-primary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('monthly')">Mensual</button>
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('weekly')">Semanal</button>
+              <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('daily')">Diario</button>
+            </div>
           </div>
         </div>
         <div id="oc-line-chart" style="min-height:280px;position:relative;"></div>
@@ -1360,19 +1370,36 @@ function renderOCCharts(){
 }
 
 let trendGranularity = 'monthly';
+let trendScope = 365;
+
+function setTrendScope(days){
+  trendScope = days;
+  // Update scope button styles
+  document.querySelectorAll('[onclick^="setTrendScope"]').forEach(b=>{
+    const d = parseInt(b.getAttribute('onclick').match(/\d+/)[0]);
+    b.className = 'btn '+(d===days?'btn-primary':'btn-secondary');
+    b.style.cssText = 'font-size:11px;padding:4px 10px;';
+  });
+  renderLineChartWithScope();
+}
+
 function setTrendGranularity(g){
   trendGranularity = g;
   document.querySelectorAll('#trend-granularity .btn').forEach(b=>{
     b.className = 'btn '+(b.textContent.trim()===(g==='monthly'?'Mensual':g==='weekly'?'Semanal':'Diario')?'btn-primary':'btn-secondary');
     b.style.cssText = 'font-size:11px;padding:4px 10px;';
   });
+  renderLineChartWithScope();
+}
+
+function renderLineChartWithScope(){
   const allOCs = (DB.clientOCs||[]);
-  let filtered = allOCs;
-  if(chartCustomFrom || chartCustomTo){
-    filtered = allOCs.filter(o=>o.date_submitted>=(chartCustomFrom||'2000-01-01') && o.date_submitted<=(chartCustomTo||'2099-12-31'));
-  } else if(chartPeriod>0){
-    const cutoff = new Date(new Date()-chartPeriod*86400000).toISOString().slice(0,10);
+  let filtered;
+  if(trendScope > 0){
+    const cutoff = new Date(new Date()-trendScope*86400000).toISOString().slice(0,10);
     filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
+  } else {
+    filtered = allOCs;
   }
   renderLineChart(filtered);
 }
