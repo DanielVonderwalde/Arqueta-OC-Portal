@@ -1392,14 +1392,14 @@ function addTierRow(data){
       <div class="field" style="margin-bottom:0;"><label>Extras</label><input type="number" step="0.01" class="t-extras" value="${d.extras??''}"></div>
       <div class="field" style="margin-bottom:0;"><label>Transporte</label><input type="number" step="0.01" class="t-transporte" value="${d.transporte??''}"></div>
     </div>
-    <div class="formrow" style="grid-template-columns:2fr 1fr;gap:8px;">
+    <div class="formrow" style="grid-template-columns:2fr 1fr 1fr;gap:8px;">
       <div class="field" style="margin-bottom:0;"><label>Valor venta total</label><input type="number" step="0.01" class="t-venta" value="${d.valor_venta_total??''}"></div>
+      <div class="field" style="margin-bottom:0;"><label>Margen %</label><input type="number" step="0.01" class="t-margen" value="${d.margen ? (d.margen<=1 ? (d.margen*100).toFixed(1) : d.margen) : ''}" placeholder="45"></div>
       <div class="field" style="margin-bottom:0;"><label style="display:block;">Solo precio (sin desglose)</label>
         <label class="pw-toggle" style="margin-top:8px;"><input type="checkbox" class="t-blended" ${d.blended?'checked':''}> Blended</label>
       </div>
     </div>
     <div class="small-note">total_insumos y costo_variable_total se calculan automáticamente.</div>
-    <input type="hidden" class="t-margen" value="${d.margen??''}">
   `;
   document.getElementById('mq-tiers').appendChild(wrap);
 }
@@ -1430,7 +1430,10 @@ function findTierRowElByQty(q){
 function setTierField(el, cls, value){
   if(value===undefined||value===null) return;
   const input = el.querySelector('.'+cls);
-  if(input) input.value = value;
+  if(!input) return;
+  // Convert margen from decimal (0.45) to percentage (45) for display
+  if(cls==='t-margen' && value>0 && value<=1) value = (value*100).toFixed(1);
+  input.value = value;
 }
 
 /* ---------------------------------------------------------------
@@ -1657,6 +1660,7 @@ function handleExcelAutofill(input){
         if(el){
           ['sustrato','acabado','materiales','mod','ee','extras','transporte'].forEach(f=> setTierField(el, 't-'+f, t[f]));
           if(t.valor_venta_total) setTierField(el, 't-venta', t.valor_venta_total);
+          if(t.margen) setTierField(el, 't-margen', t.margen);
           const blendedCb = el.querySelector('.t-blended');
           if(blendedCb) blendedCb.checked = false;
           matched++;
@@ -1716,7 +1720,7 @@ function saveQuote(){
     transporte: el.querySelector('.t-transporte').value===''?null:Number(el.querySelector('.t-transporte').value),
     valor_venta_total: Number(el.querySelector('.t-venta').value)||0,
     blended: el.querySelector('.t-blended').checked,
-    margen: el.querySelector('.t-margen').value===''?null:Number(el.querySelector('.t-margen').value),
+    margen: el.querySelector('.t-margen').value===''?null: (Number(el.querySelector('.t-margen').value)>1 ? Number(el.querySelector('.t-margen').value)/100 : Number(el.querySelector('.t-margen').value)),
     real: null
   })).filter(t=>t.quantity_tier>0);
 
