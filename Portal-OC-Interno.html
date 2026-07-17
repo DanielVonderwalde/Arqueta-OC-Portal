@@ -363,6 +363,23 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 
       <div class="card crop" style="margin-bottom:20px;">
         <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h2 style="margin:0;">Tendencia de ingresos y OCs</h2>
+          <div style="display:flex;gap:4px;" id="trend-granularity">
+            <button class="btn btn-primary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('monthly')">Mensual</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('weekly')">Semanal</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setTrendGranularity('daily')">Diario</button>
+          </div>
+        </div>
+        <div id="oc-line-chart" style="min-height:280px;position:relative;"></div>
+        <div style="display:flex;gap:20px;justify-content:center;margin-top:8px;">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;"><div style="width:12px;height:3px;background:#2B5D9B;border-radius:2px;"></div> Valor sin IVA</div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;"><div style="width:12px;height:3px;background:#2F6F62;border-radius:2px;"></div> # de OCs</div>
+        </div>
+      </div>
+
+      <div class="card crop" style="margin-bottom:20px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
         <h2>Tendencia mensual de OCs</h2>
         <div id="oc-monthly-trend" style="min-height:180px;"></div>
       </div>
@@ -1246,6 +1263,9 @@ function renderOCCharts(){
   document.getElementById('kpi-products-per-oc').textContent = avgProducts.toFixed(1);
   document.getElementById('kpi-accept-rate').textContent = acceptRate.toFixed(0)+'%';
 
+  // --- Line chart ---
+  renderLineChart(filtered);
+
   // --- Monthly trend ---
   const months = {};
   filtered.forEach(o=>{
@@ -1337,6 +1357,117 @@ function renderOCCharts(){
         ${clientsNoPortal.length?`<button class="btn btn-ghost" style="font-size:12px;" onclick="goTo('portal')">Configurar →</button>`:''}
       </div>
     </div>`;
+}
+
+let trendGranularity = 'monthly';
+function setTrendGranularity(g){
+  trendGranularity = g;
+  document.querySelectorAll('#trend-granularity .btn').forEach(b=>{
+    b.className = 'btn '+(b.textContent.trim()===(g==='monthly'?'Mensual':g==='weekly'?'Semanal':'Diario')?'btn-primary':'btn-secondary');
+    b.style.cssText = 'font-size:11px;padding:4px 10px;';
+  });
+  const allOCs = (DB.clientOCs||[]);
+  let filtered = allOCs;
+  if(chartCustomFrom || chartCustomTo){
+    filtered = allOCs.filter(o=>o.date_submitted>=(chartCustomFrom||'2000-01-01') && o.date_submitted<=(chartCustomTo||'2099-12-31'));
+  } else if(chartPeriod>0){
+    const cutoff = new Date(new Date()-chartPeriod*86400000).toISOString().slice(0,10);
+    filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
+  }
+  renderLineChart(filtered);
+}
+
+function getWeekKey(dateStr){
+  const d = new Date(dateStr+'T12:00:00');
+  const jan1 = new Date(d.getFullYear(),0,1);
+  const week = Math.ceil(((d-jan1)/86400000+jan1.getDay()+1)/7);
+  return d.getFullYear()+'-W'+String(week).padStart(2,'0');
+}
+
+function renderLineChart(filtered){
+  const buckets = {};
+  filtered.forEach(o=>{
+    const ds = o.date_submitted||'';
+    if(!ds) return;
+    let key;
+    if(trendGranularity==='daily') key = ds;
+    else if(trendGranularity==='weekly') key = getWeekKey(ds);
+    else key = ds.slice(0,7);
+    if(!buckets[key]) buckets[key]={value:0, count:0};
+    buckets[key].count++;
+    buckets[key].value += (o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0);
+  });
+
+  const keys = Object.keys(buckets).sort();
+  const container = document.getElementById('oc-line-chart');
+  if(keys.length<2){ container.innerHTML='<div class="empty" style="padding:40px;">Necesitas al menos 2 períodos con datos para la gráfica de línea</div>'; return; }
+
+  const values = keys.map(k=>buckets[k].value);
+  const counts = keys.map(k=>buckets[k].count);
+  const maxVal = Math.max(...values,1);
+  const maxCount = Math.max(...counts,1);
+
+  const W = 700, H = 220, padL = 70, padR = 20, padT = 20, padB = 50;
+  const chartW = W-padL-padR, chartH = H-padT-padB;
+  const stepX = chartW / (keys.length-1);
+
+  const valuePts = values.map((v,i)=>`${padL+i*stepX},${padT+chartH-(v/maxVal*chartH)}`).join(' ');
+  const countPts = counts.map((c,i)=>`${padL+i*stepX},${padT+chartH-(c/maxCount*chartH)}`).join(' ');
+  const valueArea = `${padL},${padT+chartH} ${valuePts} ${padL+(keys.length-1)*stepX},${padT+chartH}`;
+
+  const gridLines = [0,0.25,0.5,0.75,1].map(f=>{
+    const y = padT+chartH-f*chartH;
+    const label = moneyShort(maxVal*f);
+    return `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--line)" stroke-width="0.5"/>
+      <text x="${padL-8}" y="${y+4}" text-anchor="end" fill="var(--muted)" font-size="9" font-family="JetBrains Mono,monospace">${label}</text>`;
+  }).join('');
+
+  const formatLabel = (k)=>{
+    if(trendGranularity==='daily') return k.slice(5);
+    if(trendGranularity==='weekly') return k.replace(/^\d{4}-/,'');
+    const monthNames=['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    return monthNames[parseInt(k.slice(5))]||k.slice(5);
+  };
+
+  const xLabels = keys.map((k,i)=>{
+    const x = padL+i*stepX;
+    const show = keys.length<=15 || i%(Math.ceil(keys.length/12))===0;
+    return show ? `<text x="${x}" y="${H-8}" text-anchor="middle" fill="var(--muted)" font-size="9" font-family="Inter,sans-serif">${formatLabel(k)}</text>` : '';
+  }).join('');
+
+  const dots = values.map((v,i)=>{
+    const x=padL+i*stepX, y=padT+chartH-(v/maxVal*chartH);
+    return `<circle cx="${x}" cy="${y}" r="3.5" fill="#2B5D9B" stroke="#fff" stroke-width="1.5"/>`;
+  }).join('');
+
+  const countDots = counts.map((c,i)=>{
+    const x=padL+i*stepX, y=padT+chartH-(c/maxCount*chartH);
+    return `<circle cx="${x}" cy="${y}" r="3" fill="#2F6F62" stroke="#fff" stroke-width="1.5"/>`;
+  }).join('');
+
+  // Tooltip hover areas
+  const hoverAreas = keys.map((k,i)=>{
+    const x=padL+i*stepX;
+    return `<rect x="${x-stepX/2}" y="${padT}" width="${stepX}" height="${chartH}" fill="transparent" class="chart-hover"
+      onmouseover="document.getElementById('tt-${i}').style.display=''"
+      onmouseout="document.getElementById('tt-${i}').style.display='none'"/>
+      <g id="tt-${i}" style="display:none;">
+        <rect x="${x-50}" y="${padT-2}" width="100" height="38" rx="4" fill="var(--ink)" opacity="0.9"/>
+        <text x="${x}" y="${padT+12}" text-anchor="middle" fill="#fff" font-size="10" font-family="JetBrains Mono,monospace">${moneyShort(values[i])}</text>
+        <text x="${x}" y="${padT+26}" text-anchor="middle" fill="#9CB6D0" font-size="9" font-family="Inter,sans-serif">${counts[i]} OC${counts[i]>1?'s':''} · ${formatLabel(k)}</text>
+      </g>`;
+  }).join('');
+
+  container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;" xmlns="http://www.w3.org/2000/svg">
+    ${gridLines}
+    <polygon points="${valueArea}" fill="rgba(43,93,155,0.08)"/>
+    <polyline points="${valuePts}" fill="none" stroke="#2B5D9B" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <polyline points="${countPts}" fill="none" stroke="#2F6F62" stroke-width="1.5" stroke-dasharray="5,3" stroke-linejoin="round"/>
+    ${dots}${countDots}
+    ${xLabels}
+    <text x="${W-padR}" y="${padT-5}" text-anchor="end" fill="#2F6F62" font-size="9" font-family="Inter,sans-serif"># OCs (max ${maxCount})</text>
+    ${hoverAreas}
+  </svg>`;
 }
 
 /* =========================================================
