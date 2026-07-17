@@ -293,7 +293,29 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <button class="btn btn-primary" onclick="openQuoteModal()">+ Nueva cotización</button>
         <button class="btn btn-secondary" onclick="openClientModal()">+ Nuevo cliente</button>
         <button class="btn btn-secondary" onclick="openPOModal()">+ Registrar orden de compra</button>
-        <button class="btn btn-secondary" onclick="exportOCReport()">📊 Descargar reporte OCs</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('export-panel').style.display=document.getElementById('export-panel').style.display==='none'?'':'none'">📊 Descargar reporte OCs</button>
+      </div>
+
+      <div id="export-panel" style="display:none;margin-bottom:20px;">
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2 style="margin-top:0;">Descargar reporte de órdenes de compra</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriod(30)">30d</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriod(60)">60d</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriod(90)">90d</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriod(180)">6 meses</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriod(365)">1 año</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriod(0)">Todo</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
+            <label style="font-size:11px;color:var(--muted);">Desde:</label>
+            <input type="date" id="export-date-from" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+            <label style="font-size:11px;color:var(--muted);">Hasta:</label>
+            <input type="date" id="export-date-to" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+          </div>
+          <button class="btn btn-primary" onclick="exportOCReport()">⬇ Descargar Excel</button>
+        </div>
       </div>
 
       <div class="card crop" style="margin-bottom:20px;">
@@ -915,9 +937,24 @@ window.addEventListener('DOMContentLoaded', async ()=>{
   }
 });
 
+function setExportPeriod(days){
+  const from = document.getElementById('export-date-from');
+  const to = document.getElementById('export-date-to');
+  if(days===0){ from.value=''; to.value=''; }
+  else {
+    to.value = new Date().toISOString().slice(0,10);
+    from.value = new Date(new Date()-days*86400000).toISOString().slice(0,10);
+  }
+}
 function exportOCReport(){
-  const allOCs = (DB.clientOCs||[]);
+  let allOCs = (DB.clientOCs||[]);
   if(!allOCs.length){ showToast('No hay órdenes de compra para exportar'); return; }
+  const fromDate = document.getElementById('export-date-from').value;
+  const toDate = document.getElementById('export-date-to').value;
+  if(fromDate) allOCs = allOCs.filter(o=>o.date_submitted>=fromDate);
+  if(toDate) allOCs = allOCs.filter(o=>o.date_submitted<=toDate);
+  if(!allOCs.length){ showToast('No hay OCs en el rango seleccionado'); return; }
+  const label = fromDate && toDate ? `${fromDate}_a_${toDate}` : fromDate ? `desde_${fromDate}` : toDate ? `hasta_${toDate}` : 'todas';
   const rows = [['Número OC','Cliente','Fecha','Estado','Código','Producto','Cantidad','Precio Unitario','Valor Total sin IVA','IVA 16%','Total con IVA','Notas']];
   allOCs.forEach(o=>{
     const cl = clientById(o.client_id);
@@ -937,7 +974,7 @@ function exportOCReport(){
   ws['!cols'] = [{wch:12},{wch:20},{wch:12},{wch:12},{wch:10},{wch:25},{wch:10},{wch:12},{wch:15},{wch:12},{wch:15},{wch:25}];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Reporte OCs');
-  XLSX.writeFile(wb, 'Reporte_OCs_Arqueta_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  XLSX.writeFile(wb, 'Reporte_OCs_Arqueta_'+label+'.xlsx');
   showToast('Reporte descargado');
 }
 
