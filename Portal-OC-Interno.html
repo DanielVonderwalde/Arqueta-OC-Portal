@@ -481,7 +481,32 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="view" id="view-ordenes">
       <div class="page-head">
         <div><h1>Órdenes de compra</h1><div class="sub">Registro y verificación de órdenes de compra</div></div>
-        <button class="btn btn-primary" onclick="openPOModal()">+ Registrar orden</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary" onclick="document.getElementById('export-panel-oc').style.display=document.getElementById('export-panel-oc').style.display==='none'?'':'none'">📊 Descargar reporte</button>
+          <button class="btn btn-primary" onclick="openPOModal()">+ Registrar orden</button>
+        </div>
+      </div>
+
+      <div id="export-panel-oc" style="display:none;margin-bottom:20px;">
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2 style="margin-top:0;">Descargar reporte de órdenes de compra</h2>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriodOC(30)">30d</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriodOC(60)">60d</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriodOC(90)">90d</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriodOC(180)">6 meses</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriodOC(365)">1 año</button>
+            <button class="btn btn-secondary" style="font-size:11px;padding:4px 10px;" onclick="setExportPeriodOC(0)">Todo</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;">
+            <label style="font-size:11px;color:var(--muted);">Desde:</label>
+            <input type="date" id="export-oc-from" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+            <label style="font-size:11px;color:var(--muted);">Hasta:</label>
+            <input type="date" id="export-oc-to" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+          </div>
+          <button class="btn btn-primary" onclick="exportOCReportFromTab()">⬇ Descargar Excel</button>
+        </div>
       </div>
 
       <div class="card crop" style="padding:0;">
@@ -945,6 +970,22 @@ function setExportPeriod(days){
     to.value = new Date().toISOString().slice(0,10);
     from.value = new Date(new Date()-days*86400000).toISOString().slice(0,10);
   }
+}
+function setExportPeriodOC(days){
+  const from = document.getElementById('export-oc-from');
+  const to = document.getElementById('export-oc-to');
+  if(days===0){ from.value=''; to.value=''; }
+  else {
+    to.value = new Date().toISOString().slice(0,10);
+    from.value = new Date(new Date()-days*86400000).toISOString().slice(0,10);
+  }
+}
+function exportOCReportFromTab(){
+  const fromDate = document.getElementById('export-oc-from').value;
+  const toDate = document.getElementById('export-oc-to').value;
+  document.getElementById('export-date-from').value = fromDate;
+  document.getElementById('export-date-to').value = toDate;
+  exportOCReport();
 }
 function exportOCReport(){
   let allOCs = (DB.clientOCs||[]);
