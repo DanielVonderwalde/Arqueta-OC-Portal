@@ -293,6 +293,29 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <button class="btn btn-primary" onclick="openQuoteModal()">+ Nueva cotización</button>
         <button class="btn btn-secondary" onclick="openClientModal()">+ Nuevo cliente</button>
         <button class="btn btn-secondary" onclick="openPOModal()">+ Registrar orden de compra</button>
+        <button class="btn btn-secondary" onclick="exportOCReport()">📊 Descargar reporte OCs</button>
+      </div>
+
+      <div class="card crop" style="margin-bottom:20px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+          <h2 style="margin:0;">Valor de OCs por cliente</h2>
+          <div style="display:flex;gap:6px;" id="chart-period-pills"></div>
+        </div>
+        <div id="oc-chart" style="min-height:200px;"></div>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom:20px;">
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2>OCs por estado</h2>
+          <div id="oc-status-chart"></div>
+        </div>
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2>OCs recientes</h2>
+          <div id="oc-timeline"></div>
+        </div>
       </div>
 
       <div class="grid grid-2">
@@ -878,6 +901,32 @@ window.addEventListener('DOMContentLoaded', async ()=>{
   }
 });
 
+function exportOCReport(){
+  const allOCs = (DB.clientOCs||[]);
+  if(!allOCs.length){ showToast('No hay órdenes de compra para exportar'); return; }
+  const rows = [['Número OC','Cliente','Fecha','Estado','Código','Producto','Cantidad','Precio Unitario','Valor Total sin IVA','IVA 16%','Total con IVA','Notas']];
+  allOCs.forEach(o=>{
+    const cl = clientById(o.client_id);
+    const lines = o.lines||[];
+    lines.forEach((l,i)=>{
+      const val = (l.quantity||0)*(l.unit_price||0);
+      const iva = val*0.16;
+      rows.push([
+        i===0?o.oc_number:'', i===0?(cl?cl.name:''):'', i===0?(o.date_submitted||''):'',
+        i===0?(o.status||''):'', l.codigo||'', l.product||'',
+        l.quantity||0, l.unit_price||0, val, iva, val+iva,
+        i===0?(o.notes||''):''
+      ]);
+    });
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:12},{wch:20},{wch:12},{wch:12},{wch:10},{wch:25},{wch:10},{wch:12},{wch:15},{wch:12},{wch:15},{wch:25}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Reporte OCs');
+  XLSX.writeFile(wb, 'Reporte_OCs_Arqueta_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  showToast('Reporte descargado');
+}
+
 /* =========================================================
    NAVIGATION
    ========================================================= */
@@ -945,6 +994,70 @@ function renderInicio(){
     </div>`).join('') : `<div class="empty">Todos los clientes tienen al menos una cotización 🎉</div>`;
 
   document.getElementById('cd-newquote-btn').onclick = ()=> openQuoteModal(currentClientId);
+
+  // OC Charts
+  renderOCCharts();
+}
+
+let chartPeriod = 90;
+function setChartPeriod(days){ chartPeriod=days; renderOCCharts(); }
+
+function renderOCCharts(){
+  const allOCs = (DB.clientOCs||[]);
+  const cutoff = new Date(new Date()-chartPeriod*86400000).toISOString().slice(0,10);
+  const filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
+
+  // Period pills
+  document.getElementById('chart-period-pills').innerHTML = [30,60,90,180,365].map(d=>
+    `<button class="btn ${chartPeriod===d?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:4px 10px;" onclick="setChartPeriod(${d})">${d===365?'1 año':d+'d'}</button>`
+  ).join('');
+
+  // Bar chart — value by client
+  const byClient = {};
+  filtered.forEach(o=>{
+    const cl = clientById(o.client_id);
+    const name = cl?cl.name:'Otro';
+    const total = (o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0);
+    byClient[name] = (byClient[name]||0) + total;
+  });
+  const maxVal = Math.max(...Object.values(byClient), 1);
+  const colors = ['#2B5D9B','#3E7BC4','#5B9BD5','#7AB8E0','#A3D4F0','#1A2744'];
+  document.getElementById('oc-chart').innerHTML = Object.keys(byClient).length ? Object.entries(byClient).sort((a,b)=>b[1]-a[1]).map(([name,val],i)=>`
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+      <div style="width:120px;font-size:12px;font-weight:600;text-align:right;flex-shrink:0;">${name}</div>
+      <div style="flex:1;background:var(--paper-raised);border-radius:4px;height:28px;overflow:hidden;">
+        <div style="width:${(val/maxVal*100).toFixed(1)}%;background:${colors[i%colors.length]};height:100%;border-radius:4px;min-width:2px;"></div>
+      </div>
+      <div style="width:100px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;">${moneyShort(val)}</div>
+    </div>`).join('') : '<div class="empty" style="padding:20px;">Sin OCs en este período</div>';
+
+  // Status donut
+  const byStatus = {pendiente:0, recibida:0, rechazada:0};
+  filtered.forEach(o=>{ byStatus[o.status||'pendiente']++; });
+  const total = filtered.length || 1;
+  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',rechazada:'#A63A3A'};
+  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',rechazada:'Rechazadas'};
+  document.getElementById('oc-status-chart').innerHTML = Object.entries(byStatus).map(([s,n])=>`
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+      <div style="width:10px;height:10px;border-radius:50%;background:${statusColors[s]};"></div>
+      <div style="flex:1;font-size:13px;">${statusLabels[s]}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;">${n}</div>
+      <div style="font-size:11px;color:var(--muted);">${(n/total*100).toFixed(0)}%</div>
+    </div>`).join('');
+
+  // Recent OC timeline
+  const recent = filtered.slice(0,8);
+  document.getElementById('oc-timeline').innerHTML = recent.length ? recent.map(o=>{
+    const cl = clientById(o.client_id);
+    const val = (o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0);
+    const badge = o.status==='recibida'?'badge-match-yes':o.status==='rechazada'?'badge-match-no':'badge-borrador';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12.5px;">
+      <span class="mono" style="width:70px;">${o.oc_number}</span>
+      <span style="flex:1;">${cl?cl.name:'—'}</span>
+      <span class="mono" style="font-weight:600;">${moneyShort(val)}</span>
+      <span class="badge ${badge}" style="font-size:10px;">${o.status||'pendiente'}</span>
+    </div>`;
+  }).join('') : '<div class="empty" style="padding:16px;">Sin OCs recientes</div>';
 }
 
 /* =========================================================
@@ -1383,11 +1496,21 @@ function extractCostBreakdownFromWorkbook(wb){
       const q = Number(row[2]), p = Number(row[3]);
       if(q>0 && p>0) priceMap[q] = Math.round(p*100)/100;
     }
-    console.log('COTIZACION prices:', JSON.stringify(priceMap));
+  }
+
+  /* Read margin from PEDIDO B56 as the master source */
+  const pedidoSheet = wb.SheetNames.find(n=>wantName(n)==='PEDIDO');
+  let masterMargen = null;
+  if(pedidoSheet){
+    const pedRows = XLSX.utils.sheet_to_json(wb.Sheets[pedidoSheet], {header:1, defval:null, raw:true});
+    const b56 = pedRows[55] ? Number(pedRows[55][1]) : null;
+    if(b56 && !isNaN(b56) && b56>0 && b56<1) masterMargen = b56;
+    console.log('PEDIDO B56 margin:', masterMargen);
   }
 
   return qtyCols.map(({col,quantity})=>{
     const finalPrice = priceMap[quantity] || at(lPrecio, col) || null;
+    const tierMargen = at(lMargen, col);
     return {
       quantity_tier: quantity,
       sustrato: at(lSust, col),
@@ -1398,7 +1521,7 @@ function extractCostBreakdownFromWorkbook(wb){
       extras: at(lExt, col),
       transporte: at(lTrans, col),
       valor_venta_total: at(lVenta, col) || (finalPrice ? Math.round(quantity*finalPrice*100)/100 : null),
-      margen: at(lMargen, col),
+      margen: tierMargen || masterMargen,
       precio_pieza: finalPrice
     };
   }).filter(t=> t.sustrato!==null || t.materiales!==null || t.mod!==null);
