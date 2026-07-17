@@ -2231,14 +2231,38 @@ function clearFile(kind){
 /* =========================================================
    ORDENES DE COMPRA
    ========================================================= */
-function openPOModal(){
+let editingOCId = null;
+function openPOModal(ocId){
+  editingOCId = ocId || null;
   populateClientSelect('mp-client');
-  document.getElementById('mp-number').value='';
-  document.getElementById('mp-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('mp-notes').value='';
   document.getElementById('mp-file').value='';
   document.getElementById('mp-lines').innerHTML='';
-  for(let i=0;i<3;i++) addAdminOCLine();
+
+  if(editingOCId){
+    const oc = (DB.clientOCs||[]).find(o=>o.id===editingOCId);
+    if(oc){
+      document.getElementById('mp-client').value = oc.client_id;
+      document.getElementById('mp-number').value = oc.oc_number||'';
+      document.getElementById('mp-date').value = oc.date_submitted||'';
+      document.getElementById('mp-notes').value = oc.notes||'';
+      const lines = Array.isArray(oc.lines) ? oc.lines : Object.values(oc.lines||{});
+      lines.forEach(l=>{
+        addAdminOCLine();
+        const el = document.getElementById('mp-lines').lastChild;
+        el.querySelector('.mp-codigo').value = l.codigo||'';
+        el.querySelector('.mp-product').value = l.product||'';
+        el.querySelector('.mp-qty').value = l.quantity||'';
+        el.querySelector('.mp-price').value = l.unit_price||'';
+        calcAdminOCTotal(el.querySelector('.mp-price'));
+      });
+      if(!lines.length) for(let i=0;i<3;i++) addAdminOCLine();
+    }
+  } else {
+    document.getElementById('mp-number').value='';
+    document.getElementById('mp-date').value = new Date().toISOString().slice(0,10);
+    for(let i=0;i<3;i++) addAdminOCLine();
+  }
   document.getElementById('modal-po').classList.add('active');
 }
 function addAdminOCLine(){
@@ -2277,15 +2301,29 @@ function savePO(){
 
   const finish = (fileName, fileData) => {
     if(!DB.clientOCs) DB.clientOCs = [];
-    DB.clientOCs.push({
-      id: uid('coc'), client_id:clientId, oc_number:number,
-      lines: lines, notes: notes,
-      fileName: fileName||'', fileData: fileData||'',
-      date_submitted: document.getElementById('mp-date').value,
-      status: 'pendiente'
-    });
+    if(editingOCId){
+      const oc = DB.clientOCs.find(o=>o.id===editingOCId);
+      if(oc){
+        oc.client_id = clientId;
+        oc.oc_number = number;
+        oc.lines = lines;
+        oc.notes = notes;
+        oc.date_submitted = document.getElementById('mp-date').value;
+        if(fileName) { oc.fileName = fileName; oc.fileData = fileData; }
+      }
+      showToast('Orden de compra actualizada');
+    } else {
+      DB.clientOCs.push({
+        id: uid('coc'), client_id:clientId, oc_number:number,
+        lines: lines, notes: notes,
+        fileName: fileName||'', fileData: fileData||'',
+        date_submitted: document.getElementById('mp-date').value,
+        status: 'pendiente'
+      });
+      showToast('Orden de compra registrada');
+    }
+    editingOCId = null;
     saveData(); closeModal('modal-po'); renderPOList(); renderInicio();
-    showToast('Orden de compra registrada');
   };
 
   if(fileInput.files[0]){
@@ -2336,7 +2374,8 @@ function renderPOList(){
         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
         const statusBadge = o.status==='recibida' ? '<span class="badge badge-match-yes">Recibida</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
-        const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;"><button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>` : `<div style="display:flex;gap:4px;"><button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>`;
+        const editBtn = `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" onclick="openPOModal('${o.id}')">✏</button>`;
+        const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>` : `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>`;
         html += `<tr><td class="mono">${o.oc_number}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="${o.fileData}" download="${o.fileName}" style="color:var(--kraft);font-size:11px;">${o.fileName}</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
       });
     }
