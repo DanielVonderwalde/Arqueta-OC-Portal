@@ -179,15 +179,34 @@ firebase.initializeApp({
 });
 const fbRef = firebase.database().ref('arqueta_db');
 
+const fbFilesRef = firebase.database().ref('arqueta_files');
+
 let DB = {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[], notifEmails:[]};
 let currentClient = null;
 
 function saveData(){
-  // Strip file data — too heavy for Firebase
+  // Save OC files to cloud separately
+  (DB.clientOCs||[]).forEach(o=>{
+    if(o.fileData && o.fileData.length>100 && o.fileData!=='[cloud]'){
+      fbFilesRef.child('oc_'+o.id).set({name:o.fileName, data:o.fileData}).catch(e=>console.error('File save error:',e));
+    }
+  });
   const lite = JSON.parse(JSON.stringify(DB));
-  (lite.quotes||[]).forEach(q=>{ if(q.pdfData&&q.pdfData.length>100) q.pdfData=''; if(q.excelData&&q.excelData.length>100) q.excelData=''; if(q.excelInsertoData&&q.excelInsertoData.length>100) q.excelInsertoData=''; });
-  (lite.clientOCs||[]).forEach(o=>{ if(o.fileData&&o.fileData.length>100) o.fileData=''; });
+  (lite.quotes||[]).forEach(q=>{ if(q.pdfData&&q.pdfData.length>100) q.pdfData='[cloud]'; if(q.excelData&&q.excelData.length>100) q.excelData='[cloud]'; if(q.excelInsertoData&&q.excelInsertoData.length>100) q.excelInsertoData='[cloud]'; });
+  (lite.clientOCs||[]).forEach(o=>{ if(o.fileData&&o.fileData.length>100) o.fileData='[cloud]'; });
   fbRef.set(lite).catch(e=>console.error('Firebase write error:',e));
+}
+async function mergePortalFiles(db){
+  try{
+    const snap = await fbFilesRef.once('value');
+    const files = snap.val() || {};
+    (db.quotes||[]).forEach(q=>{
+      const pf = files['pdf_'+q.id]; if(pf && (!q.pdfData||q.pdfData==='[cloud]')){ q.pdfName=pf.name; q.pdfData=pf.data; }
+    });
+    (db.clientOCs||[]).forEach(o=>{
+      const of2 = files['oc_'+o.id]; if(of2 && (!o.fileData||o.fileData==='[cloud]')){ o.fileName=of2.name; o.fileData=of2.data; }
+    });
+  }catch(e){ console.error('File load error:',e); }
 }
 function normalizeDB(d){
   // Firebase converts arrays to objects — convert them back
@@ -462,6 +481,7 @@ window.addEventListener('DOMContentLoaded', async ()=>{
       if(!DB.clientOCs) DB.clientOCs = [];
       if(!DB.notifEmails) DB.notifEmails = [];
       console.log('Firebase loaded, clients:', DB.clients.length);
+      await mergePortalFiles(DB);
       firebaseLoaded = true;
     }
   }catch(e){ console.error('Firebase load error:',e); firebaseLoaded = true; }
