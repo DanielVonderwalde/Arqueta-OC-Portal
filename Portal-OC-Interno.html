@@ -341,8 +341,55 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         </div>
         <div class="card crop">
           <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2>Participación por cliente</h2>
+          <div id="oc-client-pie"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-3" style="margin-bottom:20px;">
+        <div class="stat-card crop"><div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <div class="lbl">TICKET PROMEDIO</div><div class="num" id="kpi-avg-ticket">—</div>
+          <div class="small-note">Valor promedio por OC</div>
+        </div>
+        <div class="stat-card crop"><div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <div class="lbl">PRODUCTOS POR OC</div><div class="num" id="kpi-products-per-oc">—</div>
+          <div class="small-note">Promedio de líneas por orden</div>
+        </div>
+        <div class="stat-card crop"><div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <div class="lbl">TASA DE ACEPTACIÓN</div><div class="num" id="kpi-accept-rate">—</div>
+          <div class="small-note">OCs aceptadas vs total</div>
+        </div>
+      </div>
+
+      <div class="card crop" style="margin-bottom:20px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <h2>Tendencia mensual de OCs</h2>
+        <div id="oc-monthly-trend" style="min-height:180px;"></div>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom:20px;">
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2>Top 5 productos más pedidos</h2>
+          <div id="oc-top-products"></div>
+        </div>
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2>Cotizaciones por estado</h2>
+          <div id="quote-status-pie"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom:20px;">
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
           <h2>OCs recientes</h2>
           <div id="oc-timeline"></div>
+        </div>
+        <div class="card crop">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2>Acciones pendientes</h2>
+          <div id="pending-actions"></div>
         </div>
       </div>
 
@@ -1164,6 +1211,132 @@ function renderOCCharts(){
       <span class="badge ${badge}" style="font-size:10px;">${o.status||'pendiente'}</span>
     </div>`;
   }).join('') : '<div class="empty" style="padding:16px;">Sin OCs recientes</div>';
+
+  // --- Client pie chart (revenue share) ---
+  const totalRevenue = Object.values(byClient).reduce((s,v)=>s+v,0) || 1;
+  let cumPct = 0;
+  const pieColors = ['#2B5D9B','#3E7BC4','#5B9BD5','#2F6F62','#1A2744','#7AB8E0'];
+  const clientEntries = Object.entries(byClient).sort((a,b)=>b[1]-a[1]);
+  const gradientParts = clientEntries.map(([name,val],i)=>{
+    const pct = val/totalRevenue*100;
+    const start = cumPct; cumPct+=pct;
+    return `${pieColors[i%pieColors.length]} ${start.toFixed(1)}% ${cumPct.toFixed(1)}%`;
+  });
+  document.getElementById('oc-client-pie').innerHTML = clientEntries.length ? `
+    <div style="display:flex;align-items:center;gap:20px;">
+      <div style="width:120px;height:120px;border-radius:50%;background:conic-gradient(${gradientParts.join(',')});flex-shrink:0;"></div>
+      <div style="flex:1;">${clientEntries.map(([name,val],i)=>`
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;">
+          <div style="width:10px;height:10px;border-radius:2px;background:${pieColors[i%pieColors.length]};flex-shrink:0;"></div>
+          <span style="flex:1;">${name}</span>
+          <span class="mono" style="font-weight:600;">${(val/totalRevenue*100).toFixed(0)}%</span>
+          <span class="mono" style="color:var(--muted);">${moneyShort(val)}</span>
+        </div>`).join('')}
+      </div>
+    </div>` : '<div class="empty" style="padding:16px;">Sin datos</div>';
+
+  // --- KPI cards ---
+  const ocValues = filtered.map(o=>(o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0));
+  const avgTicket = ocValues.length ? ocValues.reduce((s,v)=>s+v,0)/ocValues.length : 0;
+  const avgProducts = filtered.length ? filtered.reduce((s,o)=>s+(o.lines||[]).length,0)/filtered.length : 0;
+  const accepted = filtered.filter(o=>o.status==='recibida').length;
+  const acceptRate = filtered.length ? (accepted/filtered.length*100) : 0;
+
+  document.getElementById('kpi-avg-ticket').textContent = moneyShort(avgTicket);
+  document.getElementById('kpi-products-per-oc').textContent = avgProducts.toFixed(1);
+  document.getElementById('kpi-accept-rate').textContent = acceptRate.toFixed(0)+'%';
+
+  // --- Monthly trend ---
+  const months = {};
+  filtered.forEach(o=>{
+    const m = (o.date_submitted||'').slice(0,7);
+    if(!m) return;
+    if(!months[m]) months[m]={count:0, value:0};
+    months[m].count++;
+    months[m].value += (o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0);
+  });
+  const monthKeys = Object.keys(months).sort();
+  const maxMonthVal = Math.max(...Object.values(months).map(m=>m.value),1);
+  document.getElementById('oc-monthly-trend').innerHTML = monthKeys.length ? `
+    <div style="display:flex;align-items:flex-end;gap:8px;height:160px;padding-top:10px;">
+      ${monthKeys.map(k=>{
+        const pct = (months[k].value/maxMonthVal*100).toFixed(1);
+        const label = k.slice(5);
+        const monthNames = ['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+        const mName = monthNames[parseInt(label)]||label;
+        return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+          <div class="mono" style="font-size:10px;font-weight:600;">${moneyShort(months[k].value)}</div>
+          <div style="width:100%;background:var(--kraft);border-radius:4px 4px 0 0;height:${pct}%;min-height:4px;transition:height .3s;"></div>
+          <div style="font-size:10px;color:var(--muted);">${mName}</div>
+          <div style="font-size:10px;color:var(--muted);">${months[k].count} OC${months[k].count>1?'s':''}</div>
+        </div>`;
+      }).join('')}
+    </div>` : '<div class="empty" style="padding:16px;">Sin datos mensuales</div>';
+
+  // --- Top 5 products ---
+  const products = {};
+  filtered.forEach(o=>(o.lines||[]).forEach(l=>{
+    const key = l.product||'Sin nombre';
+    if(!products[key]) products[key]={qty:0, value:0, count:0};
+    products[key].qty += (l.quantity||0);
+    products[key].value += (l.quantity||0)*(l.unit_price||0);
+    products[key].count++;
+  }));
+  const topProducts = Object.entries(products).sort((a,b)=>b[1].value-a[1].value).slice(0,5);
+  document.getElementById('oc-top-products').innerHTML = topProducts.length ? `
+    <table><thead><tr><th>Producto</th><th style="text-align:right;">Piezas</th><th style="text-align:right;">Valor</th><th style="text-align:right;">Pedidos</th></tr></thead><tbody>
+    ${topProducts.map(([name,d])=>`<tr>
+      <td style="font-weight:600;font-size:12.5px;">${name}</td>
+      <td style="text-align:right;" class="mono">${qty(d.qty)}</td>
+      <td style="text-align:right;" class="mono" style="font-weight:600;">${moneyShort(d.value)}</td>
+      <td style="text-align:right;">${d.count}</td>
+    </tr>`).join('')}
+    </tbody></table>` : '<div class="empty" style="padding:16px;">Sin productos</div>';
+
+  // --- Quote status pie ---
+  const qByStatus = {vigente:0, borrador:0, vencida:0};
+  (DB.quotes||[]).forEach(q=>{ qByStatus[q.status||'borrador']++; });
+  const qTotal = DB.quotes.length || 1;
+  const qColors = {vigente:'#2F6F62', borrador:'#2B5D9B', vencida:'#A63A3A'};
+  const qLabels = {vigente:'Vigentes', borrador:'Borradores', vencida:'Vencidas'};
+  let qCum = 0;
+  const qGrad = Object.entries(qByStatus).filter(([k,v])=>v>0).map(([s,n])=>{
+    const pct = n/qTotal*100; const start=qCum; qCum+=pct;
+    return `${qColors[s]} ${start.toFixed(1)}% ${qCum.toFixed(1)}%`;
+  });
+  document.getElementById('quote-status-pie').innerHTML = `
+    <div style="display:flex;align-items:center;gap:20px;">
+      <div style="width:100px;height:100px;border-radius:50%;background:conic-gradient(${qGrad.join(',')});flex-shrink:0;"></div>
+      <div>${Object.entries(qByStatus).map(([s,n])=>`
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12.5px;">
+          <div style="width:10px;height:10px;border-radius:2px;background:${qColors[s]};"></div>
+          <span style="flex:1;">${qLabels[s]}</span>
+          <span style="font-weight:700;">${n}</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+
+  // --- Pending actions ---
+  const pendingOCs = allOCs.filter(o=>o.status==='pendiente');
+  const clientsNoQuotes = DB.clients.filter(c=>quotesForClient(c.id).length===0);
+  const clientsNoPortal = DB.clients.filter(c=>!c.portal_active);
+  document.getElementById('pending-actions').innerHTML = `
+    <div style="font-size:13px;">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);">
+        <span style="font-size:20px;">📦</span>
+        <span style="flex:1;"><strong>${pendingOCs.length}</strong> OC${pendingOCs.length!==1?'s':''} pendiente${pendingOCs.length!==1?'s':''} de revisar</span>
+        ${pendingOCs.length?`<button class="btn btn-ghost" style="font-size:12px;" onclick="goTo('ordenes')">Ver →</button>`:''}
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);">
+        <span style="font-size:20px;">📋</span>
+        <span style="flex:1;"><strong>${clientsNoQuotes.length}</strong> cliente${clientsNoQuotes.length!==1?'s':''} sin cotización</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 0;">
+        <span style="font-size:20px;">🔐</span>
+        <span style="flex:1;"><strong>${clientsNoPortal.length}</strong> cliente${clientsNoPortal.length!==1?'s':''} sin portal activo</span>
+        ${clientsNoPortal.length?`<button class="btn btn-ghost" style="font-size:12px;" onclick="goTo('portal')">Configurar →</button>`:''}
+      </div>
+    </div>`;
 }
 
 /* =========================================================
