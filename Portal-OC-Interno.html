@@ -300,7 +300,13 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <h2 style="margin:0;">Valor de OCs por cliente</h2>
-          <div style="display:flex;gap:6px;" id="chart-period-pills"></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;" id="chart-period-pills"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+            <label style="font-size:11px;color:var(--muted);">Desde:</label>
+            <input type="date" id="chart-date-from" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;" onchange="setChartCustom()">
+            <label style="font-size:11px;color:var(--muted);">Hasta:</label>
+            <input type="date" id="chart-date-to" style="padding:4px 8px;border:1px solid var(--line);border-radius:4px;font-size:12px;" onchange="setChartCustom()">
+          </div>
         </div>
         <div id="oc-chart" style="min-height:200px;"></div>
       </div>
@@ -1008,17 +1014,31 @@ function renderInicio(){
 }
 
 let chartPeriod = 90;
-function setChartPeriod(days){ chartPeriod=days; renderOCCharts(); }
+let chartCustomFrom = '', chartCustomTo = '';
+function setChartPeriod(days){ chartPeriod=days; chartCustomFrom=''; chartCustomTo=''; document.getElementById('chart-date-from').value=''; document.getElementById('chart-date-to').value=''; renderOCCharts(); }
+function setChartCustom(){
+  chartCustomFrom = document.getElementById('chart-date-from').value;
+  chartCustomTo = document.getElementById('chart-date-to').value;
+  if(chartCustomFrom || chartCustomTo){ chartPeriod=0; }
+  renderOCCharts();
+}
 
 function renderOCCharts(){
   const allOCs = (DB.clientOCs||[]);
-  const cutoff = new Date(new Date()-chartPeriod*86400000).toISOString().slice(0,10);
-  const filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
+  let filtered;
+  if(chartCustomFrom || chartCustomTo){
+    const from = chartCustomFrom || '2000-01-01';
+    const to = chartCustomTo || '2099-12-31';
+    filtered = allOCs.filter(o=>o.date_submitted>=from && o.date_submitted<=to);
+  } else {
+    const cutoff = new Date(new Date()-chartPeriod*86400000).toISOString().slice(0,10);
+    filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
+  }
 
   // Period pills
   document.getElementById('chart-period-pills').innerHTML = [30,60,90,180,365].map(d=>
-    `<button class="btn ${chartPeriod===d?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:4px 10px;" onclick="setChartPeriod(${d})">${d===365?'1 año':d+'d'}</button>`
-  ).join('');
+    `<button class="btn ${chartPeriod===d && !chartCustomFrom?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:4px 10px;" onclick="setChartPeriod(${d})">${d===365?'1 año':d+'d'}</button>`
+  ).join('') + `<button class="btn ${chartPeriod===0?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:4px 10px;" onclick="setChartPeriod(0)">Todo</button>`;
 
   // Bar chart — value by client
   const byClient = {};
