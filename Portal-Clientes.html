@@ -194,7 +194,10 @@ function saveData(){
   // Save OC files to cloud separately
   (DB.clientOCs||[]).forEach(o=>{
     if(o.fileData && o.fileData.length>100 && o.fileData!=='[cloud]'){
-      fbFilesRef.child('oc_'+o.id).set({name:o.fileName, data:o.fileData}).catch(e=>console.error('File save error:',e));
+      console.log('Saving OC file to cloud: oc_'+o.id, o.fileName, Math.round(o.fileData.length/1024)+'KB');
+      fbFilesRef.child('oc_'+o.id).set({name:o.fileName, data:o.fileData})
+        .then(()=>console.log('File saved: oc_'+o.id))
+        .catch(e=>console.error('File save FAILED: oc_'+o.id, e));
     }
   });
   const lite = JSON.parse(JSON.stringify(DB));
@@ -429,7 +432,7 @@ function renderMyOCs(client){
       const iva = subtotal*0.16;
       lines.forEach((l,i)=>{
         const total = (l.quantity||0)*(l.unit_price||0);
-        html += '<tr><td class="mono">'+(i===0?o.oc_number:'')+'</td><td class="mono" style="font-size:11px;">'+(l.codigo||'')+'</td><td>'+l.product+'</td><td style="text-align:right;">'+qty(l.quantity)+'</td><td style="text-align:right;">'+money(l.unit_price)+'</td><td style="text-align:right;font-weight:600;">'+money(total)+'</td><td>'+(i===0?(o.date_submitted||'—'):'')+'</td><td>'+(i===0&&o.fileName?'<a href="'+o.fileData+'" download="'+o.fileName+'" style="color:var(--kraft);font-size:11px;">'+o.fileName+'</a>':'')+'</td></tr>';
+        html += '<tr><td class="mono">'+(i===0?o.oc_number:'')+'</td><td class="mono" style="font-size:11px;">'+(l.codigo||'')+'</td><td>'+l.product+'</td><td style="text-align:right;">'+qty(l.quantity)+'</td><td style="text-align:right;">'+money(l.unit_price)+'</td><td style="text-align:right;font-weight:600;">'+money(total)+'</td><td>'+(i===0?(o.date_submitted||'—'):'')+'</td><td>'+(i===0&&o.fileName?'<a href="#" onclick="downloadOCFile(\''+o.id+'\',\''+o.fileName+'\');return false;" style="color:var(--kraft);font-size:11px;cursor:pointer;">'+o.fileName+'</a>':'')+'</td></tr>';
       });
       html += '<tr style="font-size:12px;"><td colspan="4"></td><td style="text-align:right;color:var(--muted);">Subtotal</td><td style="text-align:right;font-weight:600;">'+money(subtotal)+'</td><td colspan="2"></td></tr>';
       html += '<tr style="font-size:12px;"><td colspan="4"></td><td style="text-align:right;color:var(--muted);">IVA 16%</td><td style="text-align:right;">'+money(iva)+'</td><td colspan="2"></td></tr>';
@@ -484,6 +487,36 @@ function notifyNewOC(ocNumber, lines, clientName, fileData, fileName, urgente, f
     const body = encodeURIComponent('Hola,\n\nTienes una nueva orden de compra'+(urgente?' URGENTE':'')+':\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+fechaInfo+'\n\nProductos:\n'+linesText+'\n\nSubtotal: '+fmt(subtotal)+'\nIVA 16%: '+fmt(iva)+'\nTotal: '+fmt(subtotal+iva)+'\n\nRevísala aquí: '+portalUrl+'\n\nSaludos,\nPortal Arqueta Folding');
     window.open('mailto:'+emails.join(',')+('?subject='+subject+'&body='+body), '_blank');
   }
+}
+
+async function downloadOCFile(ocId, fileName){
+  showToast('Cargando archivo...');
+  try{
+    const oc = (DB.clientOCs||[]).find(o=>o.id===ocId);
+    if(oc && oc.fileData && oc.fileData.length>100 && oc.fileData!=='[cloud]'){
+      triggerDownload(oc.fileData, fileName);
+      return;
+    }
+    console.log('Loading file from Firebase: oc_'+ocId);
+    const snap = await fbFilesRef.child('oc_'+ocId).once('value');
+    const file = snap.val();
+    if(file && file.data){
+      console.log('File loaded, size:', file.data.length);
+      triggerDownload(file.data, file.name||fileName);
+    } else {
+      showToast('Archivo no encontrado — pide al admin que lo suba de nuevo');
+      console.error('File not found in Firebase for oc_'+ocId);
+    }
+  }catch(e){ console.error('Download error:',e); showToast('Error: '+e.message); }
+}
+function triggerDownload(dataUrl, fileName){
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast('Descarga iniciada');
 }
 
 window.addEventListener('DOMContentLoaded', async ()=>{
