@@ -1888,11 +1888,10 @@ function extractCostBreakdownFromWorkbook(wb){
   const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, raw:true});
   if(!rows.length) return [];
 
-  /* Row 12 (index 11) has quantities in cols F-P (indices 5-15).
-     Skip any column where qty is 0 or empty. */
+  /* Row 12 (index 11) has quantities. Scan cols 4-15 to handle different layouts. */
   const qtyRow = rows[11]||[];
   const qtyCols = [];
-  for(let idx=5; idx<=15; idx++){
+  for(let idx=4; idx<=15; idx++){
     const v = Number(qtyRow[idx]);
     if(v && v>0) qtyCols.push({col:idx, quantity:v});
   }
@@ -1927,7 +1926,7 @@ function extractCostBreakdownFromWorkbook(wb){
   }
   console.log('Labels:', Object.keys(rowOf));
 
-  const num = v => (v===null||v===undefined||v===''||isNaN(Number(v))) ? null : Math.round(Number(v)*100)/100;
+  const num = v => (v===null||v===undefined||v===''||v===' '||isNaN(Number(v))||Number(v)===0&&String(v).trim()==='') ? null : Math.round(Number(v)*100)/100;
   const at = (label, col) => rowOf[label]!==undefined ? num(rows[rowOf[label]][col]) : null;
   const find = (...names) => { for(const n of names){ if(n in rowOf) return n; } return names[0]; };
 
@@ -1966,6 +1965,7 @@ function extractCostBreakdownFromWorkbook(wb){
   return qtyCols.map(({col,quantity})=>{
     const finalPrice = priceMap[quantity] || at(lPrecio, col) || null;
     const tierMargen = at(lMargen, col);
+    console.log('Margin for', quantity, ':', tierMargen, '(from row 23, col', col, ')');
     return {
       quantity_tier: quantity,
       sustrato: at(lSust, col),
@@ -1976,7 +1976,7 @@ function extractCostBreakdownFromWorkbook(wb){
       extras: at(lExt, col),
       transporte: at(lTrans, col),
       valor_venta_total: at(lVenta, col) || (finalPrice ? Math.round(quantity*finalPrice*100)/100 : null),
-      margen: tierMargen || masterMargen,
+      margen: tierMargen !== null ? tierMargen : masterMargen,
       precio_pieza: finalPrice
     };
   }).filter(t=> t.sustrato!==null || t.materiales!==null || t.mod!==null);
