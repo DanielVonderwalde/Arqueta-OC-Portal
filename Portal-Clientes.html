@@ -141,6 +141,12 @@ tr:last-child td{border-bottom:none;}
         <div class="field" style="margin:0;"><label>Número de OC</label><input type="text" id="oc-number" placeholder="OC-001"></div>
         <div class="field" style="margin:0;"><label>Archivo (PDF/imagen de la OC)</label><input type="file" id="oc-file" accept=".pdf,.png,.jpg,.jpeg"></div>
       </div>
+      <div class="oc-form" style="grid-template-columns:1fr 1fr;">
+        <div class="field" style="margin:0;"><label>Fecha deseada de entrega</label><input type="date" id="oc-fecha-deseada"><div style="font-size:11px;color:var(--muted);margin-top:4px;">Producto nuevo: 4 semanas · Repetición: 3 semanas</div></div>
+        <div class="field" style="margin:0;"><label style="display:block;">¿Es urgencia?</label>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;"><input type="checkbox" id="oc-urgente"> <span style="color:#A63A3A;font-weight:600;">Marcar como URGENTE</span></label>
+        </div>
+      </div>
       <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Productos en esta orden</div>
       <div id="oc-lines"></div>
       <button class="btn btn-secondary" style="margin-bottom:14px;font-size:12px;" onclick="addOCLine()">+ Agregar otro producto</button>
@@ -343,6 +349,9 @@ function submitOC(){
     unit_price: Number(el.querySelector('.ol-price').value)||0
   })).filter(l=>l.product && l.quantity>0);
 
+  const fechaDeseada = document.getElementById('oc-fecha-deseada').value;
+  const urgente = document.getElementById('oc-urgente').checked;
+
   if(!ocNumber){ showToast('Escribe el número de OC'); return; }
   if(!lines.length){ showToast('Agrega al menos un producto con nombre y cantidad'); return; }
 
@@ -357,18 +366,21 @@ function submitOC(){
       fileName: fileName||'',
       fileData: fileData||'',
       date_submitted: new Date().toISOString().slice(0,10),
+      fecha_deseada: fechaDeseada,
+      urgente: urgente,
       status: 'pendiente'
     });
     saveData();
     document.getElementById('oc-number').value='';
     document.getElementById('oc-notes').value='';
+    document.getElementById('oc-fecha-deseada').value='';
+    document.getElementById('oc-urgente').checked=false;
     fileInput.value='';
     document.getElementById('oc-lines').innerHTML='';
     for(let i=0;i<3;i++) addOCLine();
     renderMyOCs(currentClient);
     showToast('Orden de compra enviada');
-    // Send email notification to daniel.vonderwalde@arquetaf.com
-    notifyNewOC(ocNumber, lines, currentClient.name, fileData, fileName);
+    notifyNewOC(ocNumber, lines, currentClient.name, fileData, fileName, urgente, fechaDeseada);
   };
 
   if(fileInput.files[0]){
@@ -429,13 +441,15 @@ function renderMyOCs(client){
 }
 
 
-function notifyNewOC(ocNumber, lines, clientName, fileData, fileName){
+function notifyNewOC(ocNumber, lines, clientName, fileData, fileName, urgente, fechaDeseada){
   const emails = (DB.notifEmails && DB.notifEmails.length) ? DB.notifEmails : ['daniel.vonderwalde@arquetaf.com'];
   const portalUrl = 'https://danielvonderwalde.github.io/Arqueta-OC-Portal/Portal-OC-Interno.html';
 
   const fmt = n => '$'+Number(n).toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
   const subtotal = lines.reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0);
   const iva = subtotal * 0.16;
+  const urgentTag = urgente ? '⚠ URGENTE — ' : '';
+  const fechaInfo = fechaDeseada ? '\nFecha deseada de entrega: '+fechaDeseada : '';
 
   const productsTable = lines.map(l=>{
     const total = (l.quantity||0)*(l.unit_price||0);
@@ -447,27 +461,27 @@ function notifyNewOC(ocNumber, lines, clientName, fileData, fileName){
   if(EMAILJS_PUBLIC_KEY && EMAILJS_TEMPLATE_ID){
     const params = {
       to_email: emails.join(','),
-      subject: 'Nueva orden de compra de '+clientName+' — OC '+ocNumber,
+      subject: urgentTag+'Nueva orden de compra de '+clientName+' — OC '+ocNumber,
       client_name: clientName,
       oc_number: ocNumber,
-      products_table: productsTable,
+      products_table: (urgente?'<tr><td colspan="4" style="padding:8px;background:#F1DCDA;color:#A63A3A;font-weight:700;text-align:center;border-radius:4px;">⚠ ORDEN URGENTE</td></tr>':'')+productsTable,
       subtotal: fmt(subtotal),
       iva: fmt(iva),
       total_con_iva: fmt(subtotal+iva),
       portal_link: portalUrl,
-      date: today
+      date: today + (fechaDeseada ? ' · Entrega deseada: '+fechaDeseada : '')
     };
     emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params)
-      .then(()=>{ console.log('Email enviado via EmailJS'); showToast('Email de notificación enviado'); })
-      .catch(e=>{ console.error('EmailJS error:',e); showToast('Error al enviar email — se abrirá tu correo'); fallbackMailto(); });
+      .then(()=>{ console.log('Email enviado'); showToast('Email de notificación enviado'); })
+      .catch(e=>{ console.error('EmailJS error:',e); showToast('Error email — se abrirá tu correo'); fallbackMailto(); });
   } else {
     fallbackMailto();
   }
 
   function fallbackMailto(){
     const linesText = lines.map(l=>(l.codigo?l.codigo+' — ':'')+l.product+' — '+l.quantity+' pza × $'+l.unit_price).join('\n');
-    const subject = encodeURIComponent('Nueva orden de compra de '+clientName+' — OC '+ocNumber);
-    const body = encodeURIComponent('Hola,\n\nTienes una nueva orden de compra:\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+'\n\nProductos:\n'+linesText+'\n\nSubtotal: '+fmt(subtotal)+'\nIVA 16%: '+fmt(iva)+'\nTotal: '+fmt(subtotal+iva)+'\n\nRevísala aquí: '+portalUrl+'\n\nSaludos,\nPortal Arqueta Folding');
+    const subject = encodeURIComponent(urgentTag+'Nueva orden de compra de '+clientName+' — OC '+ocNumber);
+    const body = encodeURIComponent('Hola,\n\nTienes una nueva orden de compra'+(urgente?' URGENTE':'')+':\n\nCliente: '+clientName+'\nNúmero de OC: '+ocNumber+fechaInfo+'\n\nProductos:\n'+linesText+'\n\nSubtotal: '+fmt(subtotal)+'\nIVA 16%: '+fmt(iva)+'\nTotal: '+fmt(subtotal+iva)+'\n\nRevísala aquí: '+portalUrl+'\n\nSaludos,\nPortal Arqueta Folding');
     window.open('mailto:'+emails.join(',')+('?subject='+subject+'&body='+body), '_blank');
   }
 }
