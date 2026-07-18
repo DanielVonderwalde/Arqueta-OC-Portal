@@ -290,7 +290,7 @@ function showPortal(client){
   } else {
     wrap.innerHTML = quotes.map(q=>{
       const tiers = DB.costBreakdown.filter(r=>r.quote_id===q.id).sort((a,b)=>a.quantity_tier-b.quantity_tier);
-      const pdfLink = (q.pdfName && q.pdfData) ? '<a class="pdf-link" href="'+q.pdfData+'" download="'+q.pdfName+'">📄 Descargar cotización PDF</a>' : '';
+      const pdfLink = (q.pdfName && q.pdfData && q.pdfData!=='[cloud]') ? '<a class="pdf-link" href="#" onclick="downloadPortalFile(\''+q.id+'\',\''+q.pdfName+'\');return false;">📄 Descargar cotización PDF</a>' : (q.pdfName ? '<a class="pdf-link" href="#" onclick="downloadPortalFile(\''+q.id+'\',\''+q.pdfName+'\');return false;">📄 Descargar cotización PDF</a>' : '');
       let html = '<div class="tier-grid">'+tiers.map(t=>
           '<div class="tier"><div class="q">'+qty(t.quantity_tier)+' pza</div>'+
           '<div class="p">'+money(t.valor_venta_total/t.quantity_tier)+'<small> /pza</small></div>'+
@@ -489,6 +489,26 @@ function notifyNewOC(ocNumber, lines, clientName, fileData, fileName, urgente, f
   }
 }
 
+async function downloadPortalFile(quoteId, fileName){
+  showToast('Cargando archivo...');
+  try{
+    // Try memory first
+    const q = (DB.quotes||[]).find(x=>x.id===quoteId);
+    if(q && q.pdfData && q.pdfData.length>100 && q.pdfData!=='[cloud]'){
+      triggerDownload(q.pdfData, fileName);
+      return;
+    }
+    // Fetch from Firebase
+    const snap = await fbFilesRef.child('pdf_'+quoteId).once('value');
+    const file = snap.val();
+    if(file && file.data){
+      triggerDownload(file.data, file.name||fileName);
+    } else {
+      showToast('PDF no encontrado en la nube');
+    }
+  }catch(e){ showToast('Error: '+e.message); }
+}
+
 async function downloadOCFile(ocId, fileName){
   showToast('Cargando archivo...');
   try{
@@ -510,13 +530,45 @@ async function downloadOCFile(ocId, fileName){
   }catch(e){ console.error('Download error:',e); showToast('Error: '+e.message); }
 }
 function triggerDownload(dataUrl, fileName){
-  const a = document.createElement('a');
-  a.href = dataUrl;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  showToast('Descarga iniciada');
+  try{
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/octet-stream';
+    const byteStr = atob(parts[1]);
+    const ab = new ArrayBuffer(byteStr.length);
+    const ia = new Uint8Array(ab);
+    for(let i=0; i<byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+    const blob = new Blob([ab], {type: mime});
+    const url = URL.createObjectURL(blob);
+
+    // Safari needs special handling
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if(isSafari){
+      // Safari: open blob in new tab, user saves from there
+      const newTab = window.open(url, '_blank');
+      if(!newTab) window.location.href = url;
+      showToast('Archivo abierto — usa Cmd+S para guardar');
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 5000);
+      showToast('Descarga iniciada');
+    }
+  }catch(e){
+    console.error('Download error:', e);
+    // Final fallback: open data URL in new tab
+    try{
+      const w = window.open('', '_blank');
+      if(w){
+        w.document.write('<html><head><title>'+fileName+'</title></head><body style="margin:0;"><iframe src="'+dataUrl+'" style="width:100%;height:100vh;border:none;"></iframe></body></html>');
+        w.document.close();
+        showToast('Archivo abierto en nueva pestaña');
+      }
+    }catch(e2){ showToast('No se pudo abrir el archivo'); }
+  }
 }
 
 window.addEventListener('DOMContentLoaded', async ()=>{
