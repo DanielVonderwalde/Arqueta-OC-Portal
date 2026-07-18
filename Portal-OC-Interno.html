@@ -269,7 +269,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item" data-view="clientes" onclick="goTo('clientes')"><span class="ic">◇</span> Clientes</div>
     <div class="nav-item" data-view="cotizaciones" onclick="goTo('cotizaciones')"><span class="ic">▤</span> Cotizaciones</div>
     <div class="nav-item" data-view="ordenes" onclick="goTo('ordenes')"><span class="ic">▥</span> Órdenes de compra</div>
-    <div class="nav-item" data-view="comparar" onclick="goTo('comparar')" class="admin-only"><span class="ic">⇄</span> Comparar</div>
+    <div class="nav-item" data-view="comparar" onclick="goTo('comparar')" class="admin-only"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')" class="admin-only"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
       <div class="who">👤 admin</div>
@@ -607,9 +607,59 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <!-- ===== COMPARAR ===== -->
     <div class="view" id="view-comparar">
       <div class="page-head">
-        <div><h1>Comparar</h1><div class="sub">Cotizado vs. real, línea por línea</div></div>
+        <div><h1>Controller</h1><div class="sub">Compara la cotización (expectativa) vs. los resultados reales de la orden de compra</div></div>
       </div>
-      <div id="comparar-list"></div>
+
+      <div class="card crop" style="margin-bottom:20px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <h2 style="margin-top:0;">1. Seleccionar cotización</h2>
+        <div class="formrow" style="grid-template-columns:1fr 1fr 1fr;gap:12px;">
+          <div class="field"><label>Cliente</label><select id="ctrl-client" onchange="ctrlClientChanged()"><option value="">Selecciona cliente...</option></select></div>
+          <div class="field"><label>Cotización</label><select id="ctrl-quote" onchange="ctrlQuoteChanged()"><option value="">Selecciona cotización...</option></select></div>
+          <div class="field"><label>Cantidad (pza)</label><select id="ctrl-tier" onchange="ctrlTierChanged()"><option value="">Selecciona cantidad...</option></select></div>
+        </div>
+      </div>
+
+      <div id="ctrl-comparison" style="display:none;">
+
+        <div class="card crop" style="margin-bottom:20px;">
+          <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+          <h2 style="margin-top:0;">2. Datos reales de la OC</h2>
+          <div class="small-note" style="margin:-8px 0 14px;">Ingresa los costos reales de producción para comparar contra lo cotizado.</div>
+          <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;">
+            <div class="field" style="margin:0;"><label>Cantidad producida</label><input type="number" id="ctrl-real-qty" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Valor de venta real</label><input type="number" step="0.01" id="ctrl-real-venta" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>MC% real</label><input type="number" step="0.01" id="ctrl-real-mc" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Precio de venta real</label><input type="number" step="0.01" id="ctrl-real-precio" onchange="ctrlRenderComparison()"></div>
+          </div>
+          <hr class="hr">
+          <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;">
+            <div class="field" style="margin:0;"><label>Papel real</label><input type="number" step="0.01" id="ctrl-real-papel" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Acabado real</label><input type="number" step="0.01" id="ctrl-real-acabado" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Materiales real</label><input type="number" step="0.01" id="ctrl-real-materiales" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Total Insumos real</label><input type="number" step="0.01" id="ctrl-real-insumos" onchange="ctrlRenderComparison()"></div>
+          </div>
+          <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;">
+            <div class="field" style="margin:0;"><label>MOD real</label><input type="number" step="0.01" id="ctrl-real-mod" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>EE/Máquinas real</label><input type="number" step="0.01" id="ctrl-real-ee" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Overhead real</label><input type="number" step="0.01" id="ctrl-real-overhead" onchange="ctrlRenderComparison()"></div>
+            <div class="field" style="margin:0;"><label>Costo Variable Total real</label><input type="number" step="0.01" id="ctrl-real-cvt" onchange="ctrlRenderComparison()"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:14px;">
+            <button class="btn btn-primary" onclick="ctrlSave()">Guardar comparación</button>
+            <button class="btn btn-secondary" onclick="ctrlClear()">Limpiar campos</button>
+          </div>
+        </div>
+
+        <div id="ctrl-scorecards"></div>
+        <div id="ctrl-table"></div>
+      </div>
+
+      <div class="card crop" style="margin-top:20px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <h2 style="margin-top:0;">Comparaciones guardadas</h2>
+        <div id="ctrl-history"></div>
+      </div>
     </div>
 
     <!-- ===== PORTAL CLIENTES ===== -->
@@ -2532,38 +2582,169 @@ function deletePO(id){
    COMPARAR — cotizado vs real
    ========================================================= */
 function renderComparar(){
-  const wrap = document.getElementById('comparar-list');
-  if(!DB.quotes.length){ wrap.innerHTML = `<div class="empty">Aún no hay cotizaciones para comparar</div>`; return; }
-  wrap.innerHTML = DB.quotes.map(q=>{
-    const cl = clientById(q.client_id);
-    const tiers = tiersForQuote(q.id).filter(t=>!t.blended);
-    if(!tiers.length) return '';
-    return `<div class="card crop" style="margin-bottom:16px;">
-      <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
-      <h2>${q.quote_number} — ${q.product_name} <span style="color:var(--muted);font-weight:400;font-size:13px;">(${cl?cl.name:''})</span></h2>
-      <table>
-        <thead><tr><th>Nivel</th><th>Costo variable cotizado</th><th>Costo real</th><th>Desviación</th></tr></thead>
-        <tbody>
-          ${tiers.map(t=>{
-            const cvt = costoVariableTotal(t);
-            const realId = `real-${q.id}-${t.quantity_tier}`;
-            const dev = (t.real!==null && t.real!==undefined && t.real!=='') ? ((Number(t.real)-cvt)/cvt*100) : null;
-            return `<tr>
-              <td class="mono">${qty(t.quantity_tier)} pza</td>
-              <td class="mono">${money(cvt)}</td>
-              <td><input type="number" step="0.01" id="${realId}" value="${t.real??''}" style="width:130px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;" onchange="setRealCost('${q.id}',${t.quantity_tier}, this.value)"></td>
-              <td>${dev===null?'—':`<span class="${dev>0?'deviation-pos':'deviation-neg'}">${dev>0?'+':''}${dev.toFixed(1)}%</span>`}</td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-      <div class="small-note">Captura el costo variable real de producción por nivel para calcular la desviación contra lo cotizado.</div>
-    </div>`;
-  }).join('');
+  // Populate client dropdown
+  const sel = document.getElementById('ctrl-client');
+  const curVal = sel.value;
+  sel.innerHTML = '<option value="">Selecciona cliente...</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  sel.value = curVal;
+  // Render saved comparisons
+  ctrlRenderHistory();
 }
-function setRealCost(quoteId, tier, value){
-  const row = DB.costBreakdown.find(r=>r.quote_id===quoteId && r.quantity_tier===tier);
-  if(row){ row.real = value===''?null:Number(value); saveData(); renderComparar(); }
+function ctrlClientChanged(){
+  const cid = document.getElementById('ctrl-client').value;
+  const qs = cid ? quotesForClient(cid) : [];
+  document.getElementById('ctrl-quote').innerHTML = '<option value="">Selecciona cotización...</option>' + qs.map(q=>`<option value="${q.id}">${q.quote_number} — ${q.product_name}</option>`).join('');
+  document.getElementById('ctrl-tier').innerHTML = '<option value="">Selecciona cantidad...</option>';
+  document.getElementById('ctrl-comparison').style.display = 'none';
+}
+function ctrlQuoteChanged(){
+  const qid = document.getElementById('ctrl-quote').value;
+  const tiers = qid ? tiersForQuote(qid) : [];
+  document.getElementById('ctrl-tier').innerHTML = '<option value="">Selecciona cantidad...</option>' + tiers.map(t=>`<option value="${t.quantity_tier}">${qty(t.quantity_tier)} pza</option>`).join('');
+  document.getElementById('ctrl-comparison').style.display = 'none';
+}
+function ctrlTierChanged(){
+  const qid = document.getElementById('ctrl-quote').value;
+  const tierQty = Number(document.getElementById('ctrl-tier').value);
+  if(!qid || !tierQty) return;
+  document.getElementById('ctrl-comparison').style.display = '';
+  // Clear real fields
+  ctrlClear();
+  ctrlRenderComparison();
+}
+function ctrlClear(){
+  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
+    document.getElementById('ctrl-real-'+f).value = '';
+  });
+  ctrlRenderComparison();
+}
+function ctrlGetQuotedData(){
+  const qid = document.getElementById('ctrl-quote').value;
+  const tierQty = Number(document.getElementById('ctrl-tier').value);
+  const tier = (DB.costBreakdown||[]).find(r=>r.quote_id===qid && r.quantity_tier===tierQty);
+  if(!tier) return null;
+  return {
+    cantidad: tier.quantity_tier,
+    papel: tier.sustrato||0,
+    acabado: tier.acabado||0,
+    materiales: tier.materiales||0,
+    insumos: (tier.sustrato||0)+(tier.acabado||0)+(tier.materiales||0),
+    mod: tier.mod||0,
+    ee: tier.ee||0,
+    overhead: tier.extras||0,
+    cvt: costoVariableTotal(tier),
+    venta: tier.valor_venta_total||0,
+    mc: tier.margen ? tier.margen*100 : marginPct(tier),
+    precio: pricePerPiece(tier)
+  };
+}
+function ctrlRenderComparison(){
+  const quoted = ctrlGetQuotedData();
+  if(!quoted){ document.getElementById('ctrl-scorecards').innerHTML=''; document.getElementById('ctrl-table').innerHTML=''; return; }
+  const real = {};
+  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
+    const v = document.getElementById('ctrl-real-'+f).value;
+    real[f] = v==='' ? null : Number(v);
+  });
+
+  const rows = [
+    {label:'Papel/Sustrato', cot:quoted.papel, real:real.papel},
+    {label:'Acabado', cot:quoted.acabado, real:real.acabado},
+    {label:'Materiales', cot:quoted.materiales, real:real.materiales},
+    {label:'Total Insumos', cot:quoted.insumos, real:real.insumos, bold:true},
+    {label:'MOD', cot:quoted.mod, real:real.mod},
+    {label:'EE/Máquinas', cot:quoted.ee, real:real.ee},
+    {label:'Overhead', cot:quoted.overhead, real:real.overhead},
+    {label:'Costo Variable Total', cot:quoted.cvt, real:real.cvt, bold:true},
+    {label:'Valor de Venta', cot:quoted.venta, real:real.venta, bold:true},
+    {label:'MC%', cot:quoted.mc, real:real.mc, isPct:true},
+    {label:'Cantidad', cot:quoted.cantidad, real:real.qty, isQty:true},
+    {label:'Precio de Venta', cot:quoted.precio, real:real.precio},
+  ];
+
+  // Scorecards
+  const keyRows = rows.filter(r=>r.bold || r.isPct);
+  document.getElementById('ctrl-scorecards').innerHTML = `<div class="grid" style="grid-template-columns:repeat(${keyRows.length},1fr);gap:12px;margin-bottom:20px;">
+    ${keyRows.map(r=>{
+      const diff = (r.real!==null && r.cot) ? r.real - r.cot : null;
+      const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
+      const color = diff===null ? 'var(--muted)' : (r.isPct ? (diff>=0?'var(--teal)':'var(--brick)') : (diff<=0?'var(--teal)':'var(--brick)'));
+      return `<div class="stat-card" style="border-left:3px solid ${color};">
+        <div class="lbl">${r.label}</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;">
+          <div><div style="font-size:10px;color:var(--muted);">Cotizado</div><div class="mono" style="font-size:14px;font-weight:600;">${r.isPct?r.cot.toFixed(1)+'%':money(r.cot)}</div></div>
+          <div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">Real</div><div class="mono" style="font-size:14px;font-weight:600;">${r.real!==null?(r.isPct?r.real.toFixed(1)+'%':money(r.real)):'—'}</div></div>
+        </div>
+        ${diff!==null?`<div style="text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:13px;font-weight:700;color:${color};">${diff>=0?'+':''}${r.isPct?diff.toFixed(1)+'pp':(diffPct!==null?diffPct.toFixed(1)+'%':'')}</div>`:''}
+      </div>`;
+    }).join('')}
+  </div>`;
+
+  // Detail table
+  document.getElementById('ctrl-table').innerHTML = `<div class="card crop" style="padding:0;">
+    <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+    <table style="padding:6px;"><thead><tr><th>Rubro</th><th style="text-align:right;">Cotizado</th><th style="text-align:right;">Real (OC)</th><th style="text-align:right;">Diferencia $</th><th style="text-align:right;">Diferencia %</th></tr></thead><tbody>
+    ${rows.map(r=>{
+      const diff = (r.real!==null && r.cot!==null) ? r.real - r.cot : null;
+      const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
+      const color = diff===null?'':diff<=0?'color:var(--teal);':'color:var(--brick);';
+      const colorInv = diff===null?'':diff>=0?'color:var(--teal);':'color:var(--brick);';
+      const useColor = r.isPct ? colorInv : color;
+      const bg = r.bold ? 'background:var(--paper-raised);' : '';
+      const fw = r.bold ? 'font-weight:700;' : '';
+      const fmtCot = r.isPct ? (r.cot!==null?r.cot.toFixed(1)+'%':'—') : r.isQty ? qty(r.cot) : money(r.cot);
+      const fmtReal = r.real!==null ? (r.isPct ? r.real.toFixed(1)+'%' : r.isQty ? qty(r.real) : money(r.real)) : '—';
+      const fmtDiff = diff!==null ? (r.isPct ? (diff>=0?'+':'')+diff.toFixed(1)+'pp' : money(diff)) : '—';
+      const fmtDiffPct = diffPct!==null ? (diffPct>=0?'+':'')+diffPct.toFixed(1)+'%' : '—';
+      return `<tr style="${bg}"><td style="${fw}">${r.label}</td><td class="mono" style="text-align:right;${fw}">${fmtCot}</td><td class="mono" style="text-align:right;${fw}">${fmtReal}</td><td class="mono" style="text-align:right;${fw}${useColor}">${fmtDiff}</td><td class="mono" style="text-align:right;${fw}${useColor}">${r.isPct?'':fmtDiffPct}</td></tr>`;
+    }).join('')}
+    </tbody></table>
+  </div>`;
+}
+function ctrlSave(){
+  const qid = document.getElementById('ctrl-quote').value;
+  const tierQty = Number(document.getElementById('ctrl-tier').value);
+  const q = quoteById(qid);
+  const cl = clientById(q?.client_id);
+  if(!qid||!tierQty){ showToast('Selecciona cotización y cantidad'); return; }
+  const quoted = ctrlGetQuotedData();
+  const real = {};
+  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
+    const v = document.getElementById('ctrl-real-'+f).value;
+    real[f] = v==='' ? null : Number(v);
+  });
+  if(!DB.controllerHistory) DB.controllerHistory = [];
+  DB.controllerHistory.push({
+    id: uid('ctrl'), date: new Date().toISOString().slice(0,10),
+    client_name: cl?.name||'', quote_number: q?.quote_number||'', product_name: q?.product_name||'',
+    quote_id: qid, tier_qty: tierQty,
+    quoted: quoted, real: real
+  });
+  saveData(); showToast('Comparación guardada'); ctrlRenderHistory();
+}
+function ctrlRenderHistory(){
+  const list = (DB.controllerHistory||[]).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const wrap = document.getElementById('ctrl-history');
+  if(!list.length){ wrap.innerHTML='<div class="empty" style="padding:20px;">Sin comparaciones guardadas aún</div>'; return; }
+  wrap.innerHTML = `<table><thead><tr><th>Fecha</th><th>Cliente</th><th>Cotización</th><th>Cantidad</th><th>CVT Cotizado</th><th>CVT Real</th><th>Desviación</th><th></th></tr></thead><tbody>
+  ${list.map(h=>{
+    const diff = (h.real?.cvt!==null && h.quoted?.cvt) ? ((h.real.cvt-h.quoted.cvt)/h.quoted.cvt*100) : null;
+    const color = diff===null?'':diff<=0?'color:var(--teal);font-weight:700;':'color:var(--brick);font-weight:700;';
+    return `<tr>
+      <td>${h.date||'—'}</td><td>${h.client_name}</td><td class="mono">${h.quote_number}</td>
+      <td class="mono">${qty(h.tier_qty)} pza</td>
+      <td class="mono">${money(h.quoted?.cvt)}</td>
+      <td class="mono">${h.real?.cvt!==null?money(h.real.cvt):'—'}</td>
+      <td class="mono" style="${color}">${diff!==null?(diff>=0?'+':'')+diff.toFixed(1)+'%':'—'}</td>
+      <td><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="ctrlDelete('${h.id}')">🗑</button></td>
+    </tr>`;
+  }).join('')}
+  </tbody></table>`;
+}
+function ctrlDelete(id){
+  if(!confirm('¿Eliminar esta comparación?')) return;
+  DB.controllerHistory = (DB.controllerHistory||[]).filter(h=>h.id!==id);
+  saveData(); ctrlRenderHistory();
 }
 
 /* =========================================================
