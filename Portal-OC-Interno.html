@@ -624,28 +624,49 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 
         <div class="card crop" style="margin-bottom:20px;">
           <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
-          <h2 style="margin-top:0;">2. Datos reales de la OC</h2>
-          <div class="small-note" style="margin:-8px 0 14px;">Ingresa los costos reales de producción para comparar contra lo cotizado.</div>
-          <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;">
-            <div class="field" style="margin:0;"><label>Cantidad producida</label><input type="number" id="ctrl-real-qty" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Valor de venta real</label><input type="number" step="0.01" id="ctrl-real-venta" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>MC% real</label><input type="number" step="0.01" id="ctrl-real-mc" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Precio de venta real</label><input type="number" step="0.01" id="ctrl-real-precio" onchange="ctrlRenderComparison()"></div>
+          <h2 style="margin-top:0;">2. Cargar resultados reales (Excel de Jobs)</h2>
+          <div class="upload-box" style="text-align:left;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;border-color:#E4C3BF;">
+            <div>
+              <strong style="color:var(--brick);">Sube el Excel de Jobs (job costing report)</strong>
+              <div style="margin-top:2px;">Se extraen los costos reales automáticamente.</div>
+            </div>
+            <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;">Elegir Excel<input type="file" id="ctrl-jobs-file" accept=".xlsx,.xls" style="display:none;" onchange="ctrlLoadJobs(this)"></label>
           </div>
-          <hr class="hr">
-          <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;">
-            <div class="field" style="margin:0;"><label>Papel real</label><input type="number" step="0.01" id="ctrl-real-papel" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Acabado real</label><input type="number" step="0.01" id="ctrl-real-acabado" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Materiales real</label><input type="number" step="0.01" id="ctrl-real-materiales" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Total Insumos real</label><input type="number" step="0.01" id="ctrl-real-insumos" onchange="ctrlRenderComparison()"></div>
+          <div class="small-note" id="ctrl-jobs-status" style="margin-bottom:12px;"></div>
+
+          <div id="ctrl-job-selector" style="display:none;margin-bottom:14px;">
+            <div class="field"><label>Selecciona el Job</label>
+              <select id="ctrl-job-select" onchange="ctrlJobSelected()" style="font-size:13px;">
+                <option value="">Selecciona un job...</option>
+              </select>
+            </div>
           </div>
-          <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;">
-            <div class="field" style="margin:0;"><label>MOD real</label><input type="number" step="0.01" id="ctrl-real-mod" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>EE/Máquinas real</label><input type="number" step="0.01" id="ctrl-real-ee" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Overhead real</label><input type="number" step="0.01" id="ctrl-real-overhead" onchange="ctrlRenderComparison()"></div>
-            <div class="field" style="margin:0;"><label>Costo Variable Total real</label><input type="number" step="0.01" id="ctrl-real-cvt" onchange="ctrlRenderComparison()"></div>
-          </div>
-          <div style="display:flex;gap:8px;margin-top:14px;">
+
+          <div class="small-note" style="margin-bottom:10px;">O ingresa los datos manualmente:</div>
+          <details style="margin-bottom:10px;">
+            <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--kraft);">Mostrar campos manuales</summary>
+            <div style="margin-top:10px;">
+              <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;">
+                <div class="field" style="margin:0;"><label>Cantidad producida</label><input type="number" id="ctrl-real-qty" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Valor de venta real</label><input type="number" step="0.01" id="ctrl-real-venta" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>MC% real</label><input type="number" step="0.01" id="ctrl-real-mc" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Precio de venta real</label><input type="number" step="0.01" id="ctrl-real-precio" onchange="ctrlRenderComparison()"></div>
+              </div>
+              <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;">
+                <div class="field" style="margin:0;"><label>Papel real</label><input type="number" step="0.01" id="ctrl-real-papel" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Acabado real</label><input type="number" step="0.01" id="ctrl-real-acabado" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Materiales real</label><input type="number" step="0.01" id="ctrl-real-materiales" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Total Insumos real</label><input type="number" step="0.01" id="ctrl-real-insumos" onchange="ctrlRenderComparison()"></div>
+              </div>
+              <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;">
+                <div class="field" style="margin:0;"><label>MOD real</label><input type="number" step="0.01" id="ctrl-real-mod" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>EE/Máquinas real</label><input type="number" step="0.01" id="ctrl-real-ee" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Overhead real</label><input type="number" step="0.01" id="ctrl-real-overhead" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Costo Variable Total real</label><input type="number" step="0.01" id="ctrl-real-cvt" onchange="ctrlRenderComparison()"></div>
+              </div>
+            </div>
+          </details>
+          <div style="display:flex;gap:8px;">
             <button class="btn btn-primary" onclick="ctrlSave()">Guardar comparación</button>
             <button class="btn btn-secondary" onclick="ctrlClear()">Limpiar campos</button>
           </div>
@@ -2619,6 +2640,86 @@ function ctrlClear(){
     document.getElementById('ctrl-real-'+f).value = '';
   });
   ctrlRenderComparison();
+}
+
+let ctrlJobsData = []; // Parsed jobs from Excel
+function ctrlLoadJobs(input){
+  const file = input.files[0];
+  if(!file) return;
+  const statusEl = document.getElementById('ctrl-jobs-status');
+  statusEl.textContent = 'Leyendo '+file.name+'...';
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
+      // Find the Jobs sheet
+      const sheetName = wb.SheetNames.find(n=>n.toLowerCase().includes('job')) || wb.SheetNames[0];
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, defval:null, raw:true});
+      if(rows.length<2){ statusEl.textContent='No se encontraron datos en el archivo.'; return; }
+
+      ctrlJobsData = [];
+      for(let r=1; r<rows.length; r++){
+        const row = rows[r];
+        if(!row || !row[2]) continue; // Skip if no Job number (col C)
+        ctrlJobsData.push({
+          rowIdx: r,
+          ordered: row[0]||'',
+          customer: row[1]||'',
+          job: row[2]||'',
+          description: row[3]||'',
+          // Cost columns
+          qty_pro: Number(row[32])||0,      // AG - QTY/PRO
+          invoicing: Number(row[17])||0,     // R - Invoicing value
+          mc_pct: Number(row[25])||0,        // Z - MC%
+          paper: Number(row[33])||0,         // AH - Paper
+          outside_svc: Number(row[31])||0,   // AF - Outside Services
+          other_mat: Number(row[29])||0,     // AD - Other materials
+          all_mat: Number(row[30])||0,       // AE - All materials
+          wage: Number(row[35])||0,          // AJ - Wage cost
+          machines: Number(row[34])||0,      // AI - Machines
+          overheads: Number(row[40])||0,     // AO - Overheads
+          total_normal: Number(row[48])||0,  // AW - Total (normal)
+        });
+      }
+
+      // Populate selector
+      const sel = document.getElementById('ctrl-job-select');
+      sel.innerHTML = '<option value="">Selecciona un job...</option>' + ctrlJobsData.map((j,i)=>{
+        const dateStr = j.ordered ? new Date(j.ordered).toLocaleDateString('es-MX',{month:'short',day:'numeric'}) : '';
+        return `<option value="${i}">${j.job} — ${j.description} (${j.customer}) ${dateStr}</option>`;
+      }).join('');
+      document.getElementById('ctrl-job-selector').style.display='';
+      statusEl.textContent = ctrlJobsData.length+' jobs encontrados en "'+sheetName+'".';
+      showToast(ctrlJobsData.length+' jobs cargados');
+    }catch(err){
+      statusEl.textContent = 'Error: '+err.message;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function ctrlJobSelected(){
+  const idx = document.getElementById('ctrl-job-select').value;
+  if(idx==='') return;
+  const j = ctrlJobsData[Number(idx)];
+  if(!j) return;
+
+  // Auto-fill all real fields
+  document.getElementById('ctrl-real-qty').value = j.qty_pro || '';
+  document.getElementById('ctrl-real-venta').value = j.invoicing || '';
+  document.getElementById('ctrl-real-mc').value = j.mc_pct ? (j.mc_pct*100).toFixed(1) : '';
+  document.getElementById('ctrl-real-precio').value = (j.qty_pro && j.invoicing) ? (j.invoicing/j.qty_pro).toFixed(2) : '';
+  document.getElementById('ctrl-real-papel').value = j.paper || '';
+  document.getElementById('ctrl-real-acabado').value = j.outside_svc || '';
+  document.getElementById('ctrl-real-materiales').value = j.other_mat || '';
+  document.getElementById('ctrl-real-insumos').value = j.all_mat || '';
+  document.getElementById('ctrl-real-mod').value = j.wage || '';
+  document.getElementById('ctrl-real-ee').value = j.machines || '';
+  document.getElementById('ctrl-real-overhead').value = j.overheads || '';
+  document.getElementById('ctrl-real-cvt').value = j.total_normal || '';
+
+  ctrlRenderComparison();
+  showToast('Datos del Job '+j.job+' cargados');
 }
 function ctrlGetQuotedData(){
   const qid = document.getElementById('ctrl-quote').value;
