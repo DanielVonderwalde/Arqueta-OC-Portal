@@ -711,6 +711,10 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <select id="mq-status"><option value="vigente">Vigente</option><option value="borrador">Borrador</option><option value="vencida">Vencida</option></select>
       </div>
     </div>
+    <div class="formrow">
+      <div class="field"><label>Descuento (%)</label><input type="number" step="0.1" id="mq-descuento" placeholder="0" style="border-color:var(--line);"></div>
+      <div class="field"><label style="color:var(--muted);font-size:11px;margin-top:24px;">Si el vendedor aplicó un descuento, ponlo aquí. Se marca en rojo en la cotización para visibilidad.</label></div>
+    </div>
 
     <hr class="hr">
     <h3 style="margin-bottom:10px;">Características (se llenan solas al cargar el Excel)</h3>
@@ -753,6 +757,12 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="formrow">
       <div class="field"><label>Fecha recibida</label><input type="date" id="mp-date"></div>
       <div class="field"><label>Archivo (PDF/imagen de la OC)</label><input type="file" id="mp-file" accept=".pdf,.png,.jpg,.jpeg"></div>
+    </div>
+    <div class="formrow">
+      <div class="field"><label>Fecha deseada de entrega</label><input type="date" id="mp-fecha-deseada"><div class="small-note" style="margin-top:4px;">Producto nuevo: 4 semanas · Repetición: 3 semanas</div></div>
+      <div class="field"><label style="display:block;">¿Es urgencia?</label>
+        <label class="pw-toggle" style="margin-top:8px;"><input type="checkbox" id="mp-urgente"> <span style="color:var(--brick);font-weight:600;">Marcar como URGENTE</span></label>
+      </div>
     </div>
     <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Productos en esta orden</div>
     <div id="mp-lines"></div>
@@ -1647,6 +1657,7 @@ function openQuoteModal(prefillClientId){
   document.getElementById('mq-product').value='';
   document.getElementById('mq-reference').value='';
   document.getElementById('mq-version').value='';
+  document.getElementById('mq-descuento').value='';
   document.getElementById('mq-inserto').checked=false;
   document.getElementById('mq-date').value = new Date().toISOString().slice(0,10);
   document.getElementById('mq-status').value='borrador';
@@ -1678,6 +1689,7 @@ function editCurrentQuoteMeta(){
   document.getElementById('mq-product').value=q.product_name;
   document.getElementById('mq-reference').value=q.reference||'';
   document.getElementById('mq-version').value=q.version||'';
+  document.getElementById('mq-descuento').value=q.descuento||'';
   document.getElementById('mq-inserto').checked=!!q.has_inserto;
   document.getElementById('mq-date').value=q.date||'';
   document.getElementById('mq-status').value=q.status;
@@ -2037,7 +2049,8 @@ function saveQuote(){
     entrega: document.getElementById('mq-entrega').value.trim(),
     lugar_entrega: document.getElementById('mq-lugar-entrega').value.trim(),
     version: document.getElementById('mq-version').value.trim(),
-    has_inserto: document.getElementById('mq-inserto').checked
+    has_inserto: document.getElementById('mq-inserto').checked,
+    descuento: Number(document.getElementById('mq-descuento').value)||0
   };
 
   const tierRows = Array.from(document.getElementById('mq-tiers').children).map(el=>({
@@ -2122,7 +2135,8 @@ function openQuoteDetail(id){
   const q = quoteById(id);
   const cl = clientById(q.client_id);
   document.getElementById('qd-title').textContent = `${q.quote_number} — ${q.product_name}`;
-  document.getElementById('qd-sub').innerHTML = `${cl?cl.name:'—'} &nbsp;·&nbsp; ${q.date||'sin fecha'} &nbsp;·&nbsp; ${statusBadge(q.status)}`;
+  const discountBadge = q.descuento ? `<span class="badge badge-match-no" style="font-size:13px;padding:4px 12px;margin-left:8px;">DESCUENTO ${q.descuento}%</span>` : '';
+  document.getElementById('qd-sub').innerHTML = `${cl?cl.name:'—'} &nbsp;·&nbsp; ${q.date||'sin fecha'} &nbsp;·&nbsp; ${statusBadge(q.status)} ${discountBadge}`;
 
   const tiers = tiersForQuote(id);
   document.getElementById('qd-price-tiers').innerHTML = tiers.map(t=>`
@@ -2246,6 +2260,8 @@ function openPOModal(ocId){
       document.getElementById('mp-number').value = oc.oc_number||'';
       document.getElementById('mp-date').value = oc.date_submitted||'';
       document.getElementById('mp-notes').value = oc.notes||'';
+      document.getElementById('mp-fecha-deseada').value = oc.fecha_deseada||'';
+      document.getElementById('mp-urgente').checked = !!oc.urgente;
       const lines = Array.isArray(oc.lines) ? oc.lines : Object.values(oc.lines||{});
       lines.forEach(l=>{
         addAdminOCLine();
@@ -2261,6 +2277,8 @@ function openPOModal(ocId){
   } else {
     document.getElementById('mp-number').value='';
     document.getElementById('mp-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('mp-fecha-deseada').value='';
+    document.getElementById('mp-urgente').checked=false;
     for(let i=0;i<3;i++) addAdminOCLine();
   }
   document.getElementById('modal-po').classList.add('active');
@@ -2309,6 +2327,8 @@ function savePO(){
         oc.lines = lines;
         oc.notes = notes;
         oc.date_submitted = document.getElementById('mp-date').value;
+        oc.fecha_deseada = document.getElementById('mp-fecha-deseada').value;
+        oc.urgente = document.getElementById('mp-urgente').checked;
         if(fileName) { oc.fileName = fileName; oc.fileData = fileData; }
       }
       showToast('Orden de compra actualizada');
@@ -2318,6 +2338,8 @@ function savePO(){
         lines: lines, notes: notes,
         fileName: fileName||'', fileData: fileData||'',
         date_submitted: document.getElementById('mp-date').value,
+        fecha_deseada: document.getElementById('mp-fecha-deseada').value,
+        urgente: document.getElementById('mp-urgente').checked,
         status: 'pendiente'
       });
       showToast('Orden de compra registrada');
@@ -2374,9 +2396,11 @@ function renderPOList(){
         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
         const statusBadge = o.status==='recibida' ? '<span class="badge badge-match-yes">Recibida</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
+        const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
+        const fechaDeseada = o.fecha_deseada ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">Entrega: ${o.fecha_deseada}</div>` : '';
         const editBtn = `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" onclick="openPOModal('${o.id}')">✏</button>`;
         const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>` : `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>`;
-        html += `<tr><td class="mono">${o.oc_number}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="${o.fileData}" download="${o.fileName}" style="color:var(--kraft);font-size:11px;">${o.fileName}</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
+        html += `<tr><td class="mono">${o.oc_number}${urgentBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;cursor:pointer;">${o.fileName}</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
       });
     }
     document.getElementById('client-oc-body').innerHTML = html;
@@ -2391,6 +2415,33 @@ function deleteClientOC(id){
   if(!confirm('¿Eliminar esta orden de compra del cliente?')) return;
   DB.clientOCs = (DB.clientOCs||[]).filter(o=>o.id!==id);
   saveData(); renderPOList(); showToast('Orden eliminada');
+}
+async function downloadOCFile(ocId, fileName){
+  showToast('Cargando archivo...');
+  try{
+    // First try from DB in memory
+    const oc = (DB.clientOCs||[]).find(o=>o.id===ocId);
+    if(oc && oc.fileData && oc.fileData.length>100 && oc.fileData!=='[cloud]'){
+      triggerDownload(oc.fileData, fileName);
+      return;
+    }
+    // Load from Firebase files path
+    const snap = await fbFilesRef.child('oc_'+ocId).once('value');
+    const file = snap.val();
+    if(file && file.data){
+      triggerDownload(file.data, file.name||fileName);
+    } else {
+      showToast('Archivo no encontrado en la nube');
+    }
+  }catch(e){ console.error('Download error:',e); showToast('Error al descargar: '+e.message); }
+}
+function triggerDownload(dataUrl, fileName){
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 function deletePO(id){
   if(!confirm('¿Eliminar esta orden de compra?')) return;
