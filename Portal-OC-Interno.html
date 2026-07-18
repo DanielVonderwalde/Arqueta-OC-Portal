@@ -616,7 +616,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <div class="formrow" style="grid-template-columns:1fr 1fr 1fr;gap:12px;">
           <div class="field"><label>Cliente</label><select id="ctrl-client" onchange="ctrlClientChanged()"><option value="">Selecciona cliente...</option></select></div>
           <div class="field"><label>Cotización</label><select id="ctrl-quote" onchange="ctrlQuoteChanged()"><option value="">Selecciona cotización...</option></select></div>
-          <div class="field"><label>Cantidad (pza)</label><select id="ctrl-tier" onchange="ctrlTierChanged()"><option value="">Selecciona cantidad...</option></select></div>
+          <div class="field"><label>Cantidad (pza)</label><input type="number" id="ctrl-tier" placeholder="Ej: 35000" onchange="ctrlTierChanged()"></div>
         </div>
       </div>
 
@@ -2600,7 +2600,9 @@ function ctrlClientChanged(){
 function ctrlQuoteChanged(){
   const qid = document.getElementById('ctrl-quote').value;
   const tiers = qid ? tiersForQuote(qid) : [];
-  document.getElementById('ctrl-tier').innerHTML = '<option value="">Selecciona cantidad...</option>' + tiers.map(t=>`<option value="${t.quantity_tier}">${qty(t.quantity_tier)} pza</option>`).join('');
+  const tierInput = document.getElementById('ctrl-tier');
+  tierInput.value = '';
+  tierInput.placeholder = tiers.length ? 'Cantidades cotizadas: '+tiers.map(t=>qty(t.quantity_tier)).join(', ') : 'Ej: 35000';
   document.getElementById('ctrl-comparison').style.display = 'none';
 }
 function ctrlTierChanged(){
@@ -2620,11 +2622,19 @@ function ctrlClear(){
 }
 function ctrlGetQuotedData(){
   const qid = document.getElementById('ctrl-quote').value;
-  const tierQty = Number(document.getElementById('ctrl-tier').value);
-  const tier = (DB.costBreakdown||[]).find(r=>r.quote_id===qid && r.quantity_tier===tierQty);
-  if(!tier) return null;
+  const inputQty = Number(document.getElementById('ctrl-tier').value);
+  if(!qid || !inputQty) return null;
+  const tiers = tiersForQuote(qid).filter(t=>!t.blended);
+  if(!tiers.length) return null;
+  // Find exact match first, then closest
+  let tier = tiers.find(t=>t.quantity_tier===inputQty);
+  if(!tier){
+    tier = tiers.reduce((best,t)=> Math.abs(t.quantity_tier-inputQty) < Math.abs(best.quantity_tier-inputQty) ? t : best);
+  }
   return {
-    cantidad: tier.quantity_tier,
+    cantidad: inputQty,
+    cantidad_cotizada: tier.quantity_tier,
+    es_exacta: tier.quantity_tier === inputQty,
     papel: tier.sustrato||0,
     acabado: tier.acabado||0,
     materiales: tier.materiales||0,
@@ -2641,6 +2651,7 @@ function ctrlGetQuotedData(){
 function ctrlRenderComparison(){
   const quoted = ctrlGetQuotedData();
   if(!quoted){ document.getElementById('ctrl-scorecards').innerHTML=''; document.getElementById('ctrl-table').innerHTML=''; return; }
+  const matchNote = quoted.es_exacta ? '' : `<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;">⚠ La cantidad <strong>${qty(quoted.cantidad)}</strong> no tiene cotización exacta — se usa la más cercana: <strong>${qty(quoted.cantidad_cotizada)} pza</strong>. Para un cálculo exacto, sube el Excel con esta cantidad en PEDIDO B31.</div>`;
   const real = {};
   ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
     const v = document.getElementById('ctrl-real-'+f).value;
@@ -2664,7 +2675,7 @@ function ctrlRenderComparison(){
 
   // Scorecards
   const keyRows = rows.filter(r=>r.bold || r.isPct);
-  document.getElementById('ctrl-scorecards').innerHTML = `<div class="grid" style="grid-template-columns:repeat(${keyRows.length},1fr);gap:12px;margin-bottom:20px;">
+  document.getElementById('ctrl-scorecards').innerHTML = matchNote + `<div class="grid" style="grid-template-columns:repeat(${keyRows.length},1fr);gap:12px;margin-bottom:20px;">
     ${keyRows.map(r=>{
       const diff = (r.real!==null && r.cot) ? r.real - r.cot : null;
       const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
