@@ -842,7 +842,10 @@ function saveData(){
   // Save files to Firebase in a SEPARATE path (one file per key, not all at once)
   const files = extractFiles(DB);
   for(const [key, fileObj] of Object.entries(files)){
-    fbFilesRef.child(key).set(fileObj).catch(e=>console.error('File save error:',key,e));
+    console.log('Saving file to cloud:', key, fileObj.name, Math.round(fileObj.data.length/1024)+'KB');
+    fbFilesRef.child(key).set(fileObj)
+      .then(()=>console.log('File saved:', key))
+      .catch(e=>console.error('File save FAILED:', key, e));
   }
   // Strip base64 from main DB before syncing (keeps it fast)
   const lite = JSON.parse(JSON.stringify(DB));
