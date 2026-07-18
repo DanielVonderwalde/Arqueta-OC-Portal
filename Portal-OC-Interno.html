@@ -2212,7 +2212,7 @@ function fileUploadHTML(kind, name, data){
     return `<div class="upload-box has-file" style="display:flex;align-items:center;justify-content:space-between;text-align:left;">
       <div>📄 <strong>${name}</strong></div>
       <div style="display:flex;gap:10px;">
-        ${data ? `<a href="${data}" download="${name}" class="btn btn-ghost">Descargar</a>` : ''}
+        ${data ? `<a href="#" onclick="downloadQuoteFile('${kind}');return false;" class="btn btn-ghost">Descargar</a>` : ''}
         <label style="cursor:pointer;color:var(--kraft);font-weight:600;">Reemplazar<input type="file" id="${inputId}" onchange="handleFileUpload(this,'${kind}')"></label>
         <button class="btn btn-ghost" style="color:var(--brick);" onclick="clearFile('${kind}')">Quitar</button>
       </div>
@@ -2419,6 +2419,33 @@ function deleteClientOC(id){
   DB.clientOCs = (DB.clientOCs||[]).filter(o=>o.id!==id);
   saveData(); renderPOList(); showToast('Orden eliminada');
 }
+async function downloadQuoteFile(kind){
+  if(!currentQuoteId) return;
+  showToast('Cargando archivo...');
+  const q = quoteById(currentQuoteId);
+  let name, data;
+  if(kind==='pdf'){ name=q.pdfName; data=q.pdfData; }
+  else if(kind==='excel_inserto'){ name=q.excelInsertoName; data=q.excelInsertoData; }
+  else { name=q.excelName; data=q.excelData; }
+
+  // If data is in memory and not a placeholder, use it
+  if(data && data.length>100 && data!=='[cloud]'){
+    triggerDownload(data, name);
+    return;
+  }
+  // Otherwise fetch from Firebase
+  try{
+    const key = kind==='pdf'?'pdf_':kind==='excel_inserto'?'xlsi_':'xls_';
+    const snap = await fbFilesRef.child(key+currentQuoteId).once('value');
+    const file = snap.val();
+    if(file && file.data){
+      triggerDownload(file.data, file.name||name);
+    } else {
+      showToast('Archivo no encontrado en la nube');
+    }
+  }catch(e){ showToast('Error: '+e.message); }
+}
+
 async function downloadOCFile(ocId, fileName){
   showToast('Cargando archivo...');
   try{
@@ -2439,12 +2466,45 @@ async function downloadOCFile(ocId, fileName){
   }catch(e){ console.error('Download error:',e); showToast('Error al descargar: '+e.message); }
 }
 function triggerDownload(dataUrl, fileName){
-  const a = document.createElement('a');
-  a.href = dataUrl;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  try{
+    const parts = dataUrl.split(',');
+    const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/octet-stream';
+    const byteStr = atob(parts[1]);
+    const ab = new ArrayBuffer(byteStr.length);
+    const ia = new Uint8Array(ab);
+    for(let i=0; i<byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+    const blob = new Blob([ab], {type: mime});
+    const url = URL.createObjectURL(blob);
+
+    // Safari needs special handling
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if(isSafari){
+      // Safari: open blob in new tab, user saves from there
+      const newTab = window.open(url, '_blank');
+      if(!newTab) window.location.href = url;
+      showToast('Archivo abierto — usa Cmd+S para guardar');
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 5000);
+      showToast('Descarga iniciada');
+    }
+  }catch(e){
+    console.error('Download error:', e);
+    // Final fallback: open data URL in new tab
+    try{
+      const w = window.open('', '_blank');
+      if(w){
+        w.document.write('<html><head><title>'+fileName+'</title></head><body style="margin:0;"><iframe src="'+dataUrl+'" style="width:100%;height:100vh;border:none;"></iframe></body></html>');
+        w.document.close();
+        showToast('Archivo abierto en nueva pestaña');
+      }
+    }catch(e2){ showToast('No se pudo abrir el archivo'); }
+  }
 }
 function deletePO(id){
   if(!confirm('¿Eliminar esta orden de compra?')) return;
