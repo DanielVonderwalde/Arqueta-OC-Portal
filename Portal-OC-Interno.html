@@ -1862,7 +1862,8 @@ function renderClientOCs(){
     const facturar = o.status==='recibida'
       ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada" onclick="marcarFacturada('${o.id}')">$</button>` : '';
     const file = o.fileName
-      ? `<button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
+      ? `<button class="btn btn-ghost" style="font-size:12px;color:var(--teal);" title="Ver ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}','view')">👁</button>
+         <button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="Descargar ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
     return `<tr>
       <td class="mono">${o.oc_number}${urg}</td>
       <td style="font-size:12px;">${prods}</td>
@@ -2583,6 +2584,7 @@ function fileUploadHTML(kind, name, data){
     return `<div class="upload-box has-file" style="display:flex;align-items:center;justify-content:space-between;text-align:left;">
       <div>📄 <strong>${name}</strong></div>
       <div style="display:flex;gap:10px;">
+        ${data && kind==='pdf' ? `<a href="#" onclick="downloadQuoteFile('${kind}','view');return false;" class="btn btn-ghost" style="color:var(--teal);font-weight:600;">👁 Ver</a>` : ''}
         ${data ? `<a href="#" onclick="downloadQuoteFile('${kind}');return false;" class="btn btn-ghost">Descargar</a>` : ''}
         <label style="cursor:pointer;color:var(--kraft);font-weight:600;">Reemplazar<input type="file" id="${inputId}" onchange="handleFileUpload(this,'${kind}')"></label>
         <button class="btn btn-ghost" style="color:var(--brick);" onclick="clearFile('${kind}')">Quitar</button>
@@ -2779,7 +2781,7 @@ function renderPOList(){
         const fechaDeseada = o.fecha_deseada ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">Entrega: ${o.fecha_deseada}</div>` : '';
         const editBtn = `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" onclick="openPOModal('${o.id}')">✏</button>`;
         const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>` : `<div style="display:flex;gap:4px;">${editBtn}${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada y archivar" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>`;
-        html += `<tr><td class="mono">${o.oc_number}${urgentBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;cursor:pointer;">${o.fileName}</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
+        html += `<tr><td class="mono">${o.oc_number}${urgentBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
       });
     }
     html += renderOCArchivo(archivadas);
@@ -2819,7 +2821,7 @@ function renderOCArchivo(list){
       <td colspan="2" style="padding:6px 10px;color:var(--muted);">${cl?cl.name:'—'}${fact}</td>
       <td style="padding:6px 10px;">${o.date_submitted||'—'}</td>
       <td style="padding:6px 10px;text-align:right;font-weight:600;">${money(sub*1.16)}</td>
-      <td style="padding:6px 10px;">${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;">archivo</a>` : '—'}</td>
+      <td style="padding:6px 10px;">${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;">👁 ver</a> <a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;">⬇</a>` : '—'}</td>
       <td style="padding:6px 10px;">${badge}</td>
       <td style="padding:6px 10px;"><div style="display:flex;gap:4px;">
         <button class="btn btn-ghost" style="font-size:11px;" title="Regresar a activas" onclick="setClientOCStatus('${o.id}','recibida')">↩</button>
@@ -2852,7 +2854,7 @@ function deleteClientOC(id){
   DB.clientOCs = (DB.clientOCs||[]).filter(o=>o.id!==id);
   saveData(); renderPOList(); showToast('Orden eliminada');
 }
-async function downloadQuoteFile(kind){
+async function downloadQuoteFile(kind, modo){
   if(!currentQuoteId) return;
   showToast('Cargando archivo...');
   const q = quoteById(currentQuoteId);
@@ -2862,8 +2864,9 @@ async function downloadQuoteFile(kind){
   else { name=q.excelName; data=q.excelData; }
 
   // If data is in memory and not a placeholder, use it
+  const entregar = (d,n)=> modo==='view' ? openViewer(d,n) : triggerDownload(d,n);
   if(data && data.length>100 && data!=='[cloud]'){
-    triggerDownload(data, name);
+    entregar(data, name);
     return;
   }
   // Otherwise fetch from Firebase
@@ -2872,27 +2875,28 @@ async function downloadQuoteFile(kind){
     const snap = await fbFilesRef.child(key+currentQuoteId).once('value');
     const file = snap.val();
     if(file && file.data){
-      triggerDownload(file.data, file.name||name);
+      entregar(file.data, file.name||name);
     } else {
       showToast('Archivo no encontrado en la nube');
     }
   }catch(e){ showToast('Error: '+e.message); }
 }
 
-async function downloadOCFile(ocId, fileName){
+async function downloadOCFile(ocId, fileName, modo){
   showToast('Cargando archivo...');
   try{
     // First try from DB in memory
+    const entregar = (d,n)=> modo==='view' ? openViewer(d,n) : triggerDownload(d,n);
     const oc = (DB.clientOCs||[]).find(o=>o.id===ocId);
     if(oc && oc.fileData && oc.fileData.length>100 && oc.fileData!=='[cloud]'){
-      triggerDownload(oc.fileData, fileName);
+      entregar(oc.fileData, fileName);
       return;
     }
     // Load from Firebase files path
     const snap = await fbFilesRef.child('oc_'+ocId).once('value');
     const file = snap.val();
     if(file && file.data){
-      triggerDownload(file.data, file.name||fileName);
+      entregar(file.data, file.name||fileName);
     } else {
       showToast('Archivo no encontrado en la nube');
     }
@@ -2943,6 +2947,71 @@ function mostrarEnlaceRespaldo(url, fileName){
     + '<button onclick="this.parentNode.remove()" style="border:none;background:none;cursor:pointer;font-size:16px;color:#6B7A8D;">&times;</button>';
   document.body.appendChild(box);
   setTimeout(()=>{ const b=document.getElementById('dl-fallback'); if(b) b.remove(); }, 45000);
+}
+
+
+/* ---------- Visor de PDF en pantalla, sin descargar ---------- */
+let _viewerUrl = null;
+
+function esVisualizable(name){
+  const ext = String(name||'').split('.').pop().toLowerCase();
+  return ['pdf','png','jpg','jpeg','gif','webp','svg'].includes(ext);
+}
+
+function cerrarViewer(){
+  const m = document.getElementById('file-viewer');
+  if(m) m.remove();
+  if(_viewerUrl){ try{ URL.revokeObjectURL(_viewerUrl); }catch(_){} _viewerUrl = null; }
+  document.removeEventListener('keydown', _viewerEsc);
+}
+function _viewerEsc(e){ if(e.key==='Escape') cerrarViewer(); }
+
+async function openViewer(data, name){
+  if(!esVisualizable(name)){
+    showToast('Los archivos de Excel no se pueden ver en pantalla — se descargan');
+    await triggerDownload(data, name);
+    return;
+  }
+  const dataUrl = normalizeDataUrl(data, name);
+  if(!dataUrl || dataUrl.length < 200){ showToast('El archivo no está disponible o quedó incompleto'); return; }
+  try{
+    cerrarViewer();
+    const blob = await dataUrlToBlob(dataUrl);
+    if(!blob || !blob.size){ showToast('El archivo llegó vacío'); return; }
+    _viewerUrl = URL.createObjectURL(blob);
+    const esImg = !/\.pdf$/i.test(name||'');
+
+    const m = document.createElement('div');
+    m.id = 'file-viewer';
+    m.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(20,26,34,.72);display:flex;flex-direction:column;padding:24px;';
+    m.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;background:#fff;border-radius:8px 8px 0 0;padding:12px 18px;">
+        <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${String(name||'archivo').replace(/</g,'&lt;')}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" style="font-size:12px;" onclick="window.open(_viewerUrl,'_blank')">Abrir en pestaña</button>
+          <button class="btn btn-primary" style="font-size:12px;" onclick="viewerDescargar()">⬇ Descargar</button>
+          <button class="btn btn-ghost" style="font-size:18px;line-height:1;padding:2px 10px;" onclick="cerrarViewer()">&times;</button>
+        </div>
+      </div>
+      <div style="flex:1;background:#525659;border-radius:0 0 8px 8px;overflow:auto;display:flex;align-items:center;justify-content:center;">
+        ${esImg
+          ? `<img src="${_viewerUrl}" style="max-width:100%;max-height:100%;object-fit:contain;">`
+          : `<iframe src="${_viewerUrl}#view=FitH" style="width:100%;height:100%;border:none;"></iframe>`}
+      </div>`;
+    m.addEventListener('click', e=>{ if(e.target===m) cerrarViewer(); });
+    document.body.appendChild(m);
+    document.addEventListener('keydown', _viewerEsc);
+    window._viewerName = name;
+  }catch(e){ showToast('No se pudo abrir el visor: '+e.message); }
+}
+
+function viewerDescargar(){
+  if(!_viewerUrl) return;
+  const a = document.createElement('a');
+  a.href = _viewerUrl; a.download = nombreSeguro(window._viewerName||'archivo');
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ try{ a.remove(); }catch(_){} }, 1000);
+  showToast('Descarga iniciada');
 }
 
 async function triggerDownload(data, fileName){
@@ -3680,10 +3749,14 @@ function renderArchivos(){
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:7px;">
           ${c.files.map(f=>`
-            <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 10px;border:1px solid var(--line);background:#fff;text-align:left;"
-                    onclick="filesDownload('${f.key}','${String(f.name).replace(/'/g,"\\'")}')" title="${FILE_TIPOS[f.type].label}">
-              <span style="color:${FILE_TIPOS[f.type].color};">${FILE_TIPOS[f.type].icon}</span> ${f.name}
-            </button>`).join('')}
+            <span style="display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:#fff;">
+              <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 10px;text-align:left;border-radius:0;"
+                      onclick="filesDownload('${f.key}','${String(f.name).replace(/'/g,"\\'")}')" title="Descargar — ${FILE_TIPOS[f.type].label}">
+                <span style="color:${FILE_TIPOS[f.type].color};">${FILE_TIPOS[f.type].icon}</span> ${f.name}
+              </button>
+              ${esVisualizable(f.name) ? `<button class="btn btn-ghost" style="font-size:12px;padding:5px 9px;border-left:1px solid var(--line);color:var(--teal);border-radius:0;"
+                      onclick="filesDownload('${f.key}','${String(f.name).replace(/'/g,"\\'")}','view')" title="Ver sin descargar">👁</button>` : ''}
+            </span>`).join('')}
         </div>
       </div>`).join('');
     return `<div class="card crop" style="margin-bottom:14px;">
@@ -3703,12 +3776,13 @@ async function filesFetch(key){
   return (f && f.data && String(f.data).length > 200) ? f : null;
 }
 
-async function filesDownload(key, name){
+async function filesDownload(key, name, modo){
   showToast('Cargando ' + name + '...');
   try{
     const f = await filesFetch(key);
     if(!f){ showToast('Este archivo no está en la nube. Vuelve a subirlo desde Cotizaciones.'); return; }
-    await triggerDownload(f.data, f.name || name);
+    if(modo==='view') await openViewer(f.data, f.name || name);
+    else await triggerDownload(f.data, f.name || name);
   }catch(e){ showToast('Error: ' + e.message); }
 }
 
