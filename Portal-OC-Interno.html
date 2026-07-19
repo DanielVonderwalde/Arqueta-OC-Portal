@@ -627,17 +627,36 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         </label>
         <div id="ctrl-qty-warning" style="display:none;"></div>
         <div class="upload-box" style="text-align:left;margin-top:12px;border-color:var(--teal);">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-            <div style="flex:1;min-width:260px;">
-              <strong style="color:var(--teal);">Desglose de costo cotizado</strong>
-              <div style="margin-top:2px;font-size:12px;">Se carga solo desde la base de datos. Si la cantidad no es un escalon cotizado, se modela costo fijo + costo variable con los escalones existentes.</div>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn btn-secondary" style="white-space:nowrap;" onclick="ctrlLoadStoredExcel()">Usar Excel guardado</button>
-              <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;">Subir otro Excel<input type="file" id="ctrl-quote-excel" accept=".xlsx,.xls" style="display:none;" onchange="ctrlLoadQuoteExcel(this)"></label>
-            </div>
+          <div style="font-weight:700;color:var(--teal);margin-bottom:4px;">Cost breakdown exacto para esta cantidad</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Descarga el Excel, pon la cantidad en <strong>PEDIDO!B31</strong>, guarda y vuelve a subirlo. Se valida solo.</div>
+
+          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <div><strong style="font-size:12.5px;">1. Descargar el Excel de la cotización</strong>
+              <div style="font-size:11.5px;color:var(--muted);" id="ctrl-dl-hint">Selecciona una cotización.</div></div>
+            <button class="btn btn-secondary" style="white-space:nowrap;" onclick="ctrlDownloadQuoteExcel()">⬇ Descargar Excel</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <div><strong style="font-size:12.5px;">2. En Excel: PEDIDO!B31 = la cantidad</strong>
+              <div style="font-size:11.5px;color:var(--muted);">Escribe la cantidad, deja que recalcule (F9) y <strong>guarda</strong>. Si no guardas, se sube con los valores viejos.</div></div>
+            <button class="btn btn-ghost" style="white-space:nowrap;color:var(--kraft);" onclick="ctrlCopyQty()">Copiar cantidad</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);">
+            <div><strong style="font-size:12.5px;">3. Volver a subirlo</strong>
+              <div style="font-size:11.5px;color:var(--muted);">Se verifica que B31 y la cantidad coincidan antes de usarlo.</div></div>
+            <label class="btn btn-primary" style="cursor:pointer;white-space:nowrap;">⬆ Subir Excel modificado<input type="file" id="ctrl-quote-excel" accept=".xlsx,.xls" style="display:none;" onchange="ctrlLoadQuoteExcel(this)"></label>
+          </div>
+
+          <div style="border-top:1px solid var(--line);padding-top:8px;margin-top:4px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);cursor:pointer;">
+              <input type="checkbox" id="ctrl-allow-model" onchange="ctrlRenderComparison()">
+              Si no subo el Excel, permitir estimación interpolada (menos preciso)
+            </label>
+            <button class="btn btn-ghost" style="font-size:11.5px;color:var(--muted);" onclick="ctrlLoadStoredExcel()">Releer Excel guardado</button>
           </div>
         </div>
+        <div id="ctrl-excel-verdict" style="margin-top:8px;"></div>
         <div class="small-note" id="ctrl-quote-excel-status" style="margin-top:6px;"></div>
       </div>
 
@@ -2728,7 +2747,11 @@ function ctrlQuoteChanged(){
   const tiers = qid ? tiersForQuote(qid).filter(t=>!t.blended) : [];
   const tierInput = document.getElementById('ctrl-tier');
   tierInput.value = '';
-  ctrlExcelTiers = null;
+  ctrlExcelTiers = null; ctrlExcelB31 = null; ctrlExcelOrigen = '';
+  ctrlVerdict('');
+  const q0 = quoteById(qid);
+  const hint = document.getElementById('ctrl-dl-hint');
+  if(hint) hint.textContent = qid ? (q0 && q0.excelName ? q0.excelName : 'Excel de ' + (q0?.quote_number||'la cotizacion')) : 'Selecciona una cotización.';
   document.getElementById('ctrl-quote-excel-status').textContent = tiers.length
     ? 'Desglose en base de datos para: ' + tiers.map(t=>qty(t.quantity_tier)).join(' · ') + ' pza'
     : 'Esta cotizacion no tiene desglose de costo guardado. Sube el Excel o cargalo desde Cotizaciones.';
@@ -2836,6 +2859,8 @@ function ctrlJobSelected(){
   showToast('Datos del Job '+j.job+' cargados');
 }
 let ctrlExcelTiers = null;   // escalones leidos de un Excel (nube o subido)
+let ctrlExcelB31 = null;     // cantidad que traia PEDIDO!B31
+let ctrlExcelOrigen = '';    // de donde salio ese Excel
 
 function ctrlTiersInUse(){
   if(ctrlExcelTiers && ctrlExcelTiers.length) return ctrlExcelTiers;
@@ -2843,8 +2868,92 @@ function ctrlTiersInUse(){
   return qid ? tiersForQuote(qid).filter(t=>!t.blended) : [];
 }
 
-/* Carga el Excel que ya esta guardado en la nube para esa cotizacion.
-   Asi no hay que volver a subirlo y alguien sin los archivos puede comparar. */
+function ctrlVerdict(html, kind){
+  const el = document.getElementById('ctrl-excel-verdict');
+  if(!el) return;
+  if(!html){ el.innerHTML=''; return; }
+  const c = kind==='ok' ? ['var(--teal)','rgba(45,122,110,.08)'] : kind==='warn' ? ['var(--kraft)','var(--kraft-soft)'] : ['var(--brick)','rgba(166,74,58,.08)'];
+  el.innerHTML = '<div style="border:1px solid '+c[0]+';background:'+c[1]+';border-radius:6px;padding:10px 14px;font-size:12.5px;">'+html+'</div>';
+}
+
+function ctrlCopyQty(){
+  const v = document.getElementById('ctrl-tier').value;
+  if(!v){ showToast('Primero define la cantidad'); return; }
+  navigator.clipboard.writeText(String(v)).then(
+    ()=>showToast('Cantidad '+qty(Number(v))+' copiada — pegala en PEDIDO!B31'),
+    ()=>showToast('Copia manual: '+v));
+}
+
+function ctrlB64ToWorkbook(data){
+  const b64 = data.includes(',') ? data.split(',')[1] : data;
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return XLSX.read(arr, {type:'array'});
+}
+
+/* Lee PEDIDO!B31 para saber con que cantidad se guardo el archivo */
+function ctrlReadPedidoQty(wb){
+  const name = wb.SheetNames.find(n=>n.trim().toUpperCase()==='PEDIDO');
+  if(!name) return null;
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:null, raw:true});
+  const v = rows[30] ? Number(rows[30][1]) : null;   // B31
+  return (v && !isNaN(v) && v>0) ? v : null;
+}
+
+/* Descarga el Excel guardado de la cotizacion, listo para editar B31 */
+async function ctrlDownloadQuoteExcel(){
+  const qid = document.getElementById('ctrl-quote').value;
+  if(!qid){ showToast('Selecciona primero una cotizacion'); return; }
+  const q = quoteById(qid);
+  showToast('Buscando el Excel...');
+  try{
+    let data = q && q.excelData;
+    if(!data || data==='[cloud]' || data.length<100){
+      const snap = await fbFilesRef.child('xls_'+qid).once('value');
+      const f = snap.val();
+      data = f && f.data;
+      if(f && f.name && !q.excelName) q.excelName = f.name;
+    }
+    if(!data){ ctrlVerdict('Esta cotizacion no tiene Excel guardado. Subelo primero desde la pestaña Cotizaciones.','bad'); return; }
+    const targetQty = Number(document.getElementById('ctrl-tier').value)||0;
+    const base = (q.quote_number||'cotizacion');
+    const name = base + (targetQty ? '_'+targetQty : '') + '.xlsx';
+    triggerDownload(data.includes(',')?data:('data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,'+data), name);
+    ctrlVerdict('Descargado <strong>'+name+'</strong>. Abrelo, pon <strong>'+(targetQty?qty(targetQty):'la cantidad')+'</strong> en <strong>PEDIDO!B31</strong>, guarda y subelo en el paso 3.','warn');
+  }catch(e){ ctrlVerdict('Error al descargar: '+e.message,'bad'); }
+}
+
+/* Valida y aplica los escalones leidos de un workbook */
+function ctrlApplyWorkbook(wb, origen){
+  const statusEl = document.getElementById('ctrl-quote-excel-status');
+  const tiers = extractCostBreakdownFromWorkbook(wb);
+  const b31 = ctrlReadPedidoQty(wb);
+  const target = Number(document.getElementById('ctrl-tier').value)||0;
+
+  if(!tiers.length){
+    ctrlVerdict('No se encontro un cost breakdown legible en la hoja <strong>Valor Venta</strong> de este archivo.','bad');
+    return false;
+  }
+  ctrlExcelTiers = tiers;
+  ctrlExcelB31 = b31;
+  ctrlExcelOrigen = origen;
+  statusEl.textContent = origen+' — escalones detectados: '+tiers.map(t=>qty(t.quantity_tier)).join(' · ')+' pza'+(b31?'  |  PEDIDO!B31 = '+qty(b31):'  |  PEDIDO!B31 no legible');
+
+  const match = tiers.find(t=>Number(t.quantity_tier)===target);
+  if(target && match){
+    ctrlVerdict('<strong>Cost breakdown EXACTO</strong> para '+qty(target)+' pza, leido directo del Excel. Esta comparacion no usa estimacion.','ok');
+  } else if(target && b31 && b31===target){
+    ctrlVerdict('PEDIDO!B31 ya trae <strong>'+qty(target)+'</strong>, pero la hoja <strong>Valor Venta</strong> sigue mostrando '+tiers.map(t=>qty(t.quantity_tier)).join(', ')+'. Casi siempre es que el archivo se guardo sin recalcular: abrelo, presiona <strong>F9</strong>, guarda y vuelve a subirlo.','warn');
+  } else if(target){
+    ctrlVerdict('Este Excel no trae la cantidad <strong>'+qty(target)+'</strong> (trae '+tiers.map(t=>qty(t.quantity_tier)).join(', ')+(b31?'; B31 = '+qty(b31):'')+'). Descargalo en el paso 1, pon la cantidad en <strong>PEDIDO!B31</strong>, guarda y subelo de nuevo.','bad');
+  } else {
+    ctrlVerdict('Excel cargado. Define la cantidad a comparar para validarlo.','warn');
+  }
+  ctrlRenderComparison();
+  return true;
+}
+
 async function ctrlLoadStoredExcel(){
   const qid = document.getElementById('ctrl-quote').value;
   const statusEl = document.getElementById('ctrl-quote-excel-status');
@@ -2858,18 +2967,8 @@ async function ctrlLoadStoredExcel(){
       const f = snap.val();
       data = f && f.data;
     }
-    if(!data){ statusEl.textContent = 'Esta cotizacion no tiene Excel guardado en la nube.'; return; }
-    const b64 = data.includes(',') ? data.split(',')[1] : data;
-    const bin = atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
-    const wb = XLSX.read(arr, {type:'array'});
-    const tiers = extractCostBreakdownFromWorkbook(wb);
-    if(!tiers.length){ statusEl.textContent = 'El Excel guardado no trae cost breakdown legible.'; return; }
-    ctrlExcelTiers = tiers;
-    statusEl.textContent = 'Excel de la nube ('+(q.excelName||'cotizacion')+') — escalones: '+tiers.map(t=>qty(t.quantity_tier)).join(' · ')+' pza';
-    ctrlRenderComparison();
-    showToast('Excel cargado desde la nube');
+    if(!data){ ctrlVerdict('Esta cotizacion no tiene Excel guardado en la nube.','bad'); statusEl.textContent=''; return; }
+    ctrlApplyWorkbook(ctrlB64ToWorkbook(data), 'Excel guardado ('+(q.excelName||'cotizacion')+')');
   }catch(e){ statusEl.textContent = 'Error al leer el Excel guardado: '+e.message; }
 }
 
@@ -2882,13 +2981,9 @@ function ctrlLoadQuoteExcel(input){
   reader.onload = function(e){
     try{
       const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
-      const tiers = extractCostBreakdownFromWorkbook(wb);
-      if(!tiers.length){ statusEl.textContent = 'No se encontro cost breakdown.'; return; }
-      ctrlExcelTiers = tiers;
-      statusEl.textContent = 'Excel '+file.name+' — escalones: '+tiers.map(t=>qty(t.quantity_tier)).join(' · ')+' pza';
-      ctrlRenderComparison();
-      showToast('Cost breakdown cargado');
-    }catch(err){ statusEl.textContent = 'Error: '+err.message; }
+      if(ctrlApplyWorkbook(wb, file.name)) showToast('Excel procesado');
+    }catch(err){ statusEl.textContent = 'Error: '+err.message; ctrlVerdict('No se pudo leer el archivo: '+err.message,'bad'); }
+    input.value = '';
   };
   reader.readAsArrayBuffer(file);
 }
@@ -2948,8 +3043,9 @@ function ctrlGetQuotedData(){
     return build(o,'exacta',inputQty);
   }
 
-  // 2) Modelo fijo + variable (necesita al menos 2 escalones)
-  if(tiers.length>=2){
+  // 2) Modelo fijo + variable — solo si el usuario lo permite explicitamente
+  const allowModel = (document.getElementById('ctrl-allow-model')||{}).checked;
+  if(tiers.length>=2 && allowModel){
     const qs = tiers.map(t=>Number(t.quantity_tier));
     const dentro = inputQty>=Math.min(...qs) && inputQty<=Math.max(...qs);
     const o = {
@@ -2973,6 +3069,18 @@ function ctrlGetQuotedData(){
       warn.style.display='';
     }
     return build(o, dentro?'interpolada':'extrapolada', inputQty);
+  }
+
+  if(!allowModel){
+    if(warn){
+      const qs2 = tiers.map(t=>Number(t.quantity_tier));
+      warn.innerHTML = '<div style="background:rgba(166,74,58,.08);border:1px solid var(--brick);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">'
+        + 'No hay cost breakdown exacto para <strong>'+qty(inputQty)+'</strong> pza. Los escalones disponibles son '+qs2.map(q=>qty(q)).join(', ')+'.<br>'
+        + 'Haz los 3 pasos de abajo (descargar Excel &rarr; PEDIDO!B31 &rarr; subir) para tener el numero exacto, '
+        + 'o marca la casilla de estimacion interpolada si te sirve un aproximado.</div>';
+      warn.style.display='';
+    }
+    return null;
   }
 
   // 3) Un solo escalon: se usa el mas cercano tal cual
@@ -3063,6 +3171,7 @@ function ctrlSave(){
   const cl = clientById(q?.client_id);
   if(!qid||!tierQty){ showToast('Selecciona cotización y cantidad'); return; }
   const quoted = ctrlGetQuotedData();
+  if(!quoted){ showToast('Sin cost breakdown para esa cantidad — sube el Excel con PEDIDO!B31'); return; }
   const real = {};
   ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
     const v = document.getElementById('ctrl-real-'+f).value;
@@ -3073,6 +3182,7 @@ function ctrlSave(){
     id: uid('ctrl'), date: new Date().toISOString().slice(0,10),
     client_name: cl?.name||'', quote_number: q?.quote_number||'', product_name: q?.product_name||'',
     quote_id: qid, tier_qty: tierQty, modo: quoted?.modo || '',
+    fuente: ctrlExcelOrigen || 'base de datos', pedido_b31: ctrlExcelB31 || null,
     quoted: quoted, real: real
   });
   saveData(); showToast('Comparación guardada'); ctrlRenderHistory();
@@ -3221,12 +3331,12 @@ function ctrlExportHistory(){
   resumen.push(['Jobs por DEBAJO o en costo', list.length-overs]);
 
   /* ---- Hoja 2: Detalle ---- */
-  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado'];
+  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31'];
   rubros.forEach(([label])=>headers.push(label+' Cot', label+' Real', label+' Dif $', label+' Dif %'));
   headers.push('MC% Cot','MC% Real','MC% Dif (pp)','Precio/pza Cot','Precio/pza Real','Precio/pza Dif');
   const detalle = [headers];
   list.forEach(h=>{
-    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—'];
+    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31)];
     rubros.forEach(([label,key])=>{
       row.push(n(h.quoted?.[key]), n(h.real?.[key]), dif(h.real?.[key],h.quoted?.[key]), difp(h.real?.[key],h.quoted?.[key]));
     });
