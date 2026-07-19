@@ -1960,8 +1960,13 @@ function reconstructPDFLines(items){
 /* Lugar / Dirección de entrega — vive arriba a la derecha del PDF, así que
    pdf.js a veces lo pega en la misma línea que texto de la columna izquierda,
    y a veces lo deja en la línea siguiente. Probamos varias estrategias. */
-const LUGAR_LABELS = /(?:Direcci[oó]n|Lugar|Punto|Domicilio)\s+de\s+entrega|Lugar\s+de\s+entrega|Entregar\s+en|Destino|Plaza\s+de\s+entrega/i;
-const OTHER_LABELS = /^(?:Cliente|Referencia|Fecha|Vigencia|Moneda|Condiciones|N[uú]mero|Cantidad|Precio|Sustrato|Calibre|Gramaje|Tintas|Barniz|Acabado|Realces|Tiempo|Contacto|Vendedor|Atenci[oó]n|IVA|Total|Subtotal)\b/i;
+const LUGAR_LABELS = /(?:Direcci[oó]n|Lugar|Punto|Domicilio|Plaza)\s+de\s+entrega|Entregar\s+en|Destino/i;
+/* En muchos PDFs la etiqueta de arriba a la derecha dice solo "Entrega".
+   Se excluye cuando en realidad es el plazo (Tiempo/Fecha/Plazo de entrega). */
+const LUGAR_LABEL_CORTA = /\bEntrega\b\s*:?/i;
+const PLAZO_LINEA = /(?:Tiempo|Fecha|Plazo|Condiciones)\s+de\s+entrega/i;
+const SOLO_PLAZO = /^\s*\d+\s*(d[ií]as?|semanas?|h[aá]biles)/i;
+const OTHER_LABELS = /^(?:Cliente|Referencia|Fecha|Vigencia|Moneda|Condiciones|N[uú]mero|Cantidad|Precio|Sustrato|Calibre|Gramaje|Tintas|Barniz|Acabado|Realces|Tiempo|Contacto|Vendedor|Atenci[oó]n|IVA|Total|Subtotal|Entrega)\b/i;
 
 function cleanLugar(v){
   if(!v) return null;
@@ -1973,12 +1978,51 @@ function cleanLugar(v){
   if(OTHER_LABELS.test(v)) return null;
   if(/^\d+$/.test(v)) return null;
   if(/AFCOT|cotizaci[oó]n/i.test(v)) return null;
+  if(SOLO_PLAZO.test(v)) return null;
   return v;
 }
 
+/* Si el parser no encuentra el lugar de entrega, mostramos las primeras
+   lineas del PDF para que se escoja con un clic. Nunca se queda vacio. */
+function ctrlPdfLugarFallback(lines, encontrado){
+  const host = document.getElementById('mq-pdf-status');
+  if(!host) return;
+  const prev = document.getElementById('mq-lugar-picker');
+  if(prev) prev.remove();
+  if(encontrado) return;
+  const cands = lines.slice(0, 22)
+    .map(l=>String(l).trim())
+    .filter(l=>l.length>3 && l.length<80 && !/^\d+([.,]\d+)?$/.test(l));
+  if(!cands.length) return;
+  const box = document.createElement('div');
+  box.id = 'mq-lugar-picker';
+  box.style.cssText = 'margin-top:8px;border:1px solid var(--kraft);background:var(--kraft-soft);border-radius:6px;padding:10px 12px;font-size:12px;';
+  box.innerHTML = '<div style="margin-bottom:6px;">No se detectó el <strong>lugar de entrega</strong>. Haz clic en la línea correcta del PDF:</div>'
+    + '<div style="display:flex;flex-wrap:wrap;gap:6px;">'
+    + cands.map((l,i)=>`<button type="button" class="btn btn-ghost" style="font-size:11px;padding:3px 8px;border:1px solid var(--line);background:#fff;" onclick="mqSetLugar(${i})">${l.replace(/</g,'&lt;')}</button>`).join('')
+    + '</div>';
+  window.__lugarCands = cands;
+  host.parentNode.insertBefore(box, host.nextSibling);
+}
+function mqSetLugar(i){
+  const v = (window.__lugarCands||[])[i];
+  if(v===undefined) return;
+  document.getElementById('mq-lugar-entrega').value = v;
+  const p = document.getElementById('mq-lugar-picker'); if(p) p.remove();
+  showToast('Lugar de entrega: '+v);
+}
+
 function extractLugarEntrega(lines){
-  for(let i=0;i<lines.length;i++){
-    const m = lines[i].match(LUGAR_LABELS);
+  // 1a pasada: etiquetas explicitas. 2a pasada: "Entrega" sola, solo en el encabezado.
+  const found = buscarLugar(lines, LUGAR_LABELS, lines.length);
+  if(found) return found;
+  return buscarLugar(lines, LUGAR_LABEL_CORTA, Math.min(25, lines.length));
+}
+function buscarLugar(lines, rx, limite){
+  for(let i=0;i<limite;i++){
+    // "Tiempo de entrega" es el plazo, no el lugar
+    if(rx===LUGAR_LABEL_CORTA && PLAZO_LINEA.test(lines[i])) continue;
+    const m = lines[i].match(rx);
     if(!m) continue;
     // 1) lo que sigue a la etiqueta en la misma línea
     let after = lines[i].slice(m.index + m[0].length);
@@ -2052,9 +2096,11 @@ async function handlePDFAutofill(input){
       document.getElementById('mq-reference').value = ex.reference;
     }
     ['sustrato','calibre','gramaje','tintas','barniz','acabado_spec','realces','entrega','lugar_entrega'].forEach(k=>{
-      const el = document.getElementById('mq-'+k.replace('_spec','-spec'));
+      const el = document.getElementById('mq-'+k.replace(/_/g,'-'));
       if(el && ex[k]) el.value = ex[k];
     });
+    // Si aun asi no salio el lugar de entrega, dejamos escoger la linea a mano
+    ctrlPdfLugarFallback(lines, ex.lugar_entrega);
 
     if(ex.tiers.length){
       // Clear any existing tiers and add ONLY what the PDF contains
