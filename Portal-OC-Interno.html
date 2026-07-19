@@ -269,6 +269,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item" data-view="clientes" onclick="goTo('clientes')"><span class="ic">◇</span> Clientes</div>
     <div class="nav-item" data-view="cotizaciones" onclick="goTo('cotizaciones')"><span class="ic">▤</span> Cotizaciones</div>
     <div class="nav-item" data-view="ordenes" onclick="goTo('ordenes')"><span class="ic">▥</span> Órdenes de compra</div>
+    <div class="nav-item" data-view="archivos" onclick="goTo('archivos')"><span class="ic">▦</span> Archivos</div>
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
@@ -760,6 +761,40 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
       </div>
     </div>
 
+
+    <!-- ===== ARCHIVOS ===== -->
+    <div class="view" id="view-archivos">
+      <div class="page-head">
+        <div><h1>Archivos</h1><div class="sub">Todos los PDFs de cotización, Excels de costo y archivos de órdenes de compra, ordenados por cliente</div></div>
+        <button class="btn btn-primary" onclick="filesDownloadZip()">⬇ Descargar ZIP</button>
+      </div>
+
+      <div class="card crop" style="margin-bottom:16px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <div class="formrow" style="grid-template-columns:1.2fr 1fr 1fr 1fr;gap:10px;align-items:end;">
+          <div class="field" style="margin:0;"><label>Buscar</label><input type="text" id="fx-q" placeholder="Nombre, cotización o producto" oninput="renderArchivos()"></div>
+          <div class="field" style="margin:0;"><label>Cliente</label><select id="fx-client" onchange="renderArchivos()"><option value="">Todos</option></select></div>
+          <div class="field" style="margin:0;"><label>Tipo</label>
+            <select id="fx-type" onchange="renderArchivos()">
+              <option value="">Todos</option>
+              <option value="pdf">PDF de cotización</option>
+              <option value="xls">Excel de costo</option>
+              <option value="xlsi">Excel de inserto</option>
+              <option value="oc">Archivo de orden de compra</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;"><label>Desde</label><input type="date" id="fx-from" onchange="renderArchivos()"></div>
+        </div>
+        <div class="formrow" style="grid-template-columns:1fr auto;gap:10px;align-items:end;margin-top:8px;">
+          <div class="field" style="margin:0;max-width:220px;"><label>Hasta</label><input type="date" id="fx-to" onchange="renderArchivos()"></div>
+          <button class="btn btn-ghost" style="font-size:12px;" onclick="filesClearFilters()">Limpiar filtros</button>
+        </div>
+      </div>
+
+      <div class="small-note" id="files-summary" style="margin-bottom:12px;"></div>
+      <div id="files-tree"></div>
+    </div>
+
     <!-- ===== PORTAL CLIENTES ===== -->
     <div class="view" id="view-portal">
       <div class="page-head">
@@ -942,6 +977,7 @@ firebase.initializeApp({
 const fbRef = firebase.database().ref('arqueta_db');
 </script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.min.js"></script>
 <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.6.347/pdf.worker.min.js';</script>
 <script>
@@ -1282,7 +1318,7 @@ function goTo(view){
   if(view==='portal') renderPortal();
 }
 function renderAll(){
-  renderInicio(); renderClientsList(); renderQuotesList(); renderPOList();
+  renderInicio(); renderClientsList(); renderQuotesList(); renderPOList(); renderArchivos();
   renderPortal();
   if(currentRole==='admin'){ renderComparar(); }
 }
@@ -3422,6 +3458,162 @@ function ctrlRenderHistory(){
   </tbody></table>`;
 }
 /* Limpia todo y deja el Controller listo para empezar de cero */
+
+/* =================== ARCHIVOS ===================
+   El indice se arma desde la base de datos (nombres y metadatos), NO leyendo
+   arqueta_files completo: eso bajaria todos los base64 de golpe. El contenido
+   se descarga por archivo, solo cuando se pide.                              */
+const FILE_TIPOS = {
+  pdf:  {label:'PDF de cotización',     icon:'▤', color:'var(--brick)'},
+  xls:  {label:'Excel de costo',        icon:'▦', color:'var(--teal)'},
+  xlsi: {label:'Excel de inserto',      icon:'▦', color:'var(--teal)'},
+  oc:   {label:'Archivo de OC',         icon:'▥', color:'var(--kraft)'}
+};
+
+function buildFileIndex(){
+  const out = [];
+  const cli = id => (DB.clients.find(c=>c.id===id)||{}).name || 'Sin cliente';
+  (DB.quotes||[]).forEach(q=>{
+    const base = {clientId:q.client_id, client:cli(q.client_id), date:q.date||'',
+                  quote:q.quote_number||'', product:q.product_name||'', quoteId:q.id};
+    if(q.pdfName)          out.push({...base, key:'pdf_'+q.id,  type:'pdf',  name:q.pdfName});
+    if(q.excelName)        out.push({...base, key:'xls_'+q.id,  type:'xls',  name:q.excelName});
+    if(q.excelInsertoName) out.push({...base, key:'xlsi_'+q.id, type:'xlsi', name:q.excelInsertoName});
+  });
+  (DB.clientOCs||[]).forEach(o=>{
+    if(!o.fileName) return;
+    out.push({clientId:o.client_id, client:cli(o.client_id), date:o.date_submitted||'',
+              quote:o.oc_number||'', product:'Orden de compra', quoteId:o.id,
+              key:'oc_'+o.id, type:'oc', name:o.fileName});
+  });
+  return out;
+}
+
+function filesFiltered(){
+  const q    = (document.getElementById('fx-q').value||'').toLowerCase().trim();
+  const cliF = document.getElementById('fx-client').value;
+  const tipo = document.getElementById('fx-type').value;
+  const from = document.getElementById('fx-from').value;
+  const to   = document.getElementById('fx-to').value;
+  return buildFileIndex().filter(f=>{
+    if(cliF && f.clientId !== cliF) return false;
+    if(tipo && f.type !== tipo) return false;
+    if(from && (f.date||'') < from) return false;
+    if(to   && (f.date||'') > to)   return false;
+    if(q && !((f.name+' '+f.quote+' '+f.product+' '+f.client).toLowerCase().includes(q))) return false;
+    return true;
+  }).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+}
+
+function filesClearFilters(){
+  ['fx-q','fx-client','fx-type','fx-from','fx-to'].forEach(id=>document.getElementById(id).value='');
+  renderArchivos();
+}
+
+function renderArchivos(){
+  const sel = document.getElementById('fx-client');
+  if(sel && sel.options.length <= 1){
+    sel.innerHTML = '<option value="">Todos</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  }
+  const list = filesFiltered();
+  const wrap = document.getElementById('files-tree');
+  const sum  = document.getElementById('files-summary');
+  const porTipo = {};
+  list.forEach(f=>porTipo[f.type] = (porTipo[f.type]||0)+1);
+  sum.innerHTML = list.length
+    ? `<strong>${list.length}</strong> archivo(s) · ` + Object.entries(porTipo).map(([t,n])=>`${n} ${FILE_TIPOS[t].label}`).join(' · ')
+    : '';
+  if(!list.length){ wrap.innerHTML = '<div class="empty" style="padding:26px;">No hay archivos con estos filtros</div>'; return; }
+
+  // Cliente → Cotización / OC → archivos
+  const porCliente = {};
+  list.forEach(f=>{
+    (porCliente[f.client] = porCliente[f.client] || {})[f.quoteId] =
+      porCliente[f.client][f.quoteId] || {quote:f.quote, product:f.product, date:f.date, files:[]};
+    porCliente[f.client][f.quoteId].files.push(f);
+  });
+
+  wrap.innerHTML = Object.entries(porCliente).map(([clientName, carpetas])=>{
+    const total = Object.values(carpetas).reduce((a,c)=>a+c.files.length,0);
+    const cuerpo = Object.entries(carpetas).map(([qid, c])=>`
+      <div style="padding:10px 0;border-top:1px solid var(--line);">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">
+          <div style="font-weight:600;font-size:12.5px;">${c.quote||'—'} <span style="font-weight:400;color:var(--muted);">· ${c.product||''}</span></div>
+          <div class="mono" style="font-size:11px;color:var(--muted);">${c.date||''}</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:7px;">
+          ${c.files.map(f=>`
+            <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 10px;border:1px solid var(--line);background:#fff;text-align:left;"
+                    onclick="filesDownload('${f.key}','${String(f.name).replace(/'/g,"\\'")}')" title="${FILE_TIPOS[f.type].label}">
+              <span style="color:${FILE_TIPOS[f.type].color};">${FILE_TIPOS[f.type].icon}</span> ${f.name}
+            </button>`).join('')}
+        </div>
+      </div>`).join('');
+    return `<div class="card crop" style="margin-bottom:14px;">
+      <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="font-weight:700;font-size:14px;">${clientName}</div>
+        <div style="font-size:11.5px;color:var(--muted);">${total} archivo(s)</div>
+      </div>
+      ${cuerpo}
+    </div>`;
+  }).join('');
+}
+
+async function filesFetch(key){
+  const snap = await fbFilesRef.child(key).once('value');
+  const f = snap.val();
+  return (f && f.data && String(f.data).length > 200) ? f : null;
+}
+
+async function filesDownload(key, name){
+  showToast('Cargando ' + name + '...');
+  try{
+    const f = await filesFetch(key);
+    if(!f){ showToast('Este archivo no está en la nube. Vuelve a subirlo desde Cotizaciones.'); return; }
+    await triggerDownload(f.data, f.name || name);
+  }catch(e){ showToast('Error: ' + e.message); }
+}
+
+/* Empaqueta lo que este filtrado en un ZIP con carpetas por cliente */
+async function filesDownloadZip(){
+  const list = filesFiltered();
+  if(!list.length){ showToast('No hay archivos con estos filtros'); return; }
+  if(typeof JSZip === 'undefined'){ showToast('No cargó la librería de ZIP — revisa tu conexión'); return; }
+  if(list.length > 60 && !confirm('Son ' + list.length + ' archivos. Puede tardar y consumir memoria. ¿Continuar?')) return;
+
+  const btn = event && event.target ? event.target : null;
+  const zip = new JSZip();
+  let ok = 0, fail = 0;
+  const limpia = t => String(t||'').replace(/[\\/:*?"<>|]+/g,'-').trim() || 'sin-nombre';
+
+  for(let i=0;i<list.length;i++){
+    const f = list[i];
+    if(btn) btn.textContent = 'Empaquetando ' + (i+1) + '/' + list.length + '...';
+    try{
+      const got = await filesFetch(f.key);
+      if(!got){ fail++; continue; }
+      const carpeta = f.type==='oc'
+        ? limpia(f.client) + '/Ordenes de compra'
+        : limpia(f.client) + '/' + limpia(f.quote || 'cotizacion');
+      const b64 = String(got.data).includes(',') ? String(got.data).split(',')[1] : String(got.data);
+      zip.folder(carpeta).file(limpia(got.name || f.name), b64, {base64:true});
+      ok++;
+    }catch(_){ fail++; }
+  }
+  if(btn) btn.textContent = 'Comprimiendo...';
+  try{
+    const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:6}});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'Arqueta_archivos_' + new Date().toISOString().slice(0,10) + '.zip';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(_){} }, 120000);
+    showToast(ok + ' archivo(s) en el ZIP' + (fail ? ' · ' + fail + ' no estaban en la nube' : ''));
+  }catch(e){ showToast('No se pudo generar el ZIP: ' + e.message); }
+  if(btn) btn.textContent = '⬇ Descargar ZIP';
+}
+
 function ctrlNueva(){
   ['ctrl-client','ctrl-quote'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
   document.getElementById('ctrl-quote').innerHTML = '<option value="">Selecciona cotización...</option>';
