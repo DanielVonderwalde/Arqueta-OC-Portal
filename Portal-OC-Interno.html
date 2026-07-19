@@ -608,6 +608,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="view" id="view-comparar">
       <div class="page-head">
         <div><h1>Controller</h1><div class="sub">Compara la cotización (expectativa) vs. los resultados reales de la orden de compra</div></div>
+        <button class="btn btn-primary" onclick="ctrlNueva()">+ Nueva comparación</button>
       </div>
 
       <div class="card crop" style="margin-bottom:20px;">
@@ -3218,8 +3219,10 @@ function ctrlRenderComparison(){
     }).join('')}
   </div>`;
 
-  // Detail table
-  document.getElementById('ctrl-table').innerHTML = `<div class="card crop" style="padding:0;">
+  // Graficas + tabla de detalle
+  const charts = ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado.', ctrlChartBars(quoted, real))
+               + ctrlChartCard('Qué movió la desviación','A la izquierda ahorro, a la derecha sobrecosto.', ctrlChartDeviation(quoted, real));
+  document.getElementById('ctrl-table').innerHTML = charts + `<div class="card crop" style="padding:0;">
     <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
     <table style="padding:6px;"><thead><tr><th>Rubro</th><th style="text-align:right;">Cotizado</th><th style="text-align:right;">Real (OC)</th><th style="text-align:right;">Diferencia $</th><th style="text-align:right;">Diferencia %</th></tr></thead><tbody>
     ${rows.map(r=>{
@@ -3317,6 +3320,127 @@ function ctrlRenderHistory(){
   }).join('')}
   </tbody></table>`;
 }
+/* Limpia todo y deja el Controller listo para empezar de cero */
+function ctrlNueva(){
+  ['ctrl-client','ctrl-quote'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  document.getElementById('ctrl-quote').innerHTML = '<option value="">Selecciona cotización...</option>';
+  document.getElementById('ctrl-tier').value = '';
+  document.getElementById('ctrl-quoted-price').value = '';
+  ctrlExcelTiers = null; ctrlExcelB31 = null; ctrlExcelOrigen = ''; ctrlJobMC = null; ctrlJobsData = [];
+  const js = document.getElementById('ctrl-job-select'); if(js) js.innerHTML = '<option value="">Selecciona un job...</option>';
+  const jsel = document.getElementById('ctrl-job-selector'); if(jsel) jsel.style.display = 'none';
+  ['ctrl-jobs-status','ctrl-quote-excel-status','ctrl-mc-check'].forEach(id=>{ const e=document.getElementById(id); if(e) e.textContent=''; });
+  ctrlVerdict('');
+  const w = document.getElementById('ctrl-qty-warning'); if(w){ w.innerHTML=''; w.style.display='none'; }
+  ctrlClear();
+  document.getElementById('ctrl-comparison').style.display = 'none';
+  document.getElementById('ctrl-scorecards').innerHTML = '';
+  document.getElementById('ctrl-table').innerHTML = '';
+  const head = document.querySelector('#view-comparar .page-head');
+  if(head) head.scrollIntoView({behavior:'smooth', block:'start'});
+  showToast('Listo para una nueva comparación');
+}
+
+/* ---------- Graficas SVG (sin librerias) ---------- */
+const CHART_ROWS = [['papel','Papel'],['acabado','Acabado'],['materiales','Materiales'],
+  ['mod','MOD'],['ee','EE/Máquinas'],['overhead','Overhead']];
+
+function svgEsc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* Barras agrupadas: cotizado vs real por rubro */
+function ctrlChartBars(quoted, real){
+  const data = CHART_ROWS.map(([k,label])=>({label, cot:Number(quoted?.[k])||0, real:(real?.[k]===null||real?.[k]===undefined)?null:Number(real[k])}))
+                         .filter(d=>d.cot>0 || d.real);
+  if(!data.length) return '';
+  const max = Math.max(...data.map(d=>Math.max(d.cot, d.real||0))) || 1;
+  const W=720, L=110, R=95, rowH=40, H=data.length*rowH+34;
+  const bw = W-L-R;
+  let body='';
+  data.forEach((d,i)=>{
+    const y = 24 + i*rowH;
+    const wc = Math.max(1, d.cot/max*bw);
+    const wr = d.real!==null ? Math.max(1, d.real/max*bw) : 0;
+    body += `<text x="${L-10}" y="${y+15}" text-anchor="end" font-size="12" fill="var(--muted)">${svgEsc(d.label)}</text>`;
+    body += `<rect x="${L}" y="${y}" width="${wc}" height="11" rx="2" fill="var(--kraft)" opacity=".85"><title>Cotizado ${money(d.cot)}</title></rect>`;
+    if(d.real!==null){
+      const peor = d.real > d.cot;
+      body += `<rect x="${L}" y="${y+14}" width="${wr}" height="11" rx="2" fill="${peor?'var(--brick)':'var(--teal)'}"><title>Real ${money(d.real)}</title></rect>`;
+      const dif = d.cot ? (d.real-d.cot)/d.cot*100 : 0;
+      body += `<text x="${W-R+8}" y="${y+18}" font-size="11" font-weight="700" fill="${peor?'var(--brick)':'var(--teal)'}">${dif>=0?'+':''}${dif.toFixed(1)}%</text>`;
+    } else {
+      body += `<text x="${W-R+8}" y="${y+18}" font-size="11" fill="var(--muted)">sin dato</text>`;
+    }
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible;">
+    <g font-family="inherit">
+      <rect x="${L}" y="4" width="9" height="9" rx="2" fill="var(--kraft)" opacity=".85"/><text x="${L+14}" y="12" font-size="11" fill="var(--muted)">Cotizado</text>
+      <rect x="${L+80}" y="4" width="9" height="9" rx="2" fill="var(--teal)"/><text x="${L+94}" y="12" font-size="11" fill="var(--muted)">Real (mejor)</text>
+      <rect x="${L+185}" y="4" width="9" height="9" rx="2" fill="var(--brick)"/><text x="${L+199}" y="12" font-size="11" fill="var(--muted)">Real (peor)</text>
+      ${body}
+    </g></svg>`;
+}
+
+/* Barras divergentes: cuanto aporto cada rubro a la desviacion */
+function ctrlChartDeviation(quoted, real){
+  const data = CHART_ROWS.map(([k,label])=>({label, d:(real?.[k]===null||real?.[k]===undefined)?null:(Number(real[k])-(Number(quoted?.[k])||0))}))
+                         .filter(x=>x.d!==null && Math.abs(x.d)>0.005)
+                         .sort((a,b)=>Math.abs(b.d)-Math.abs(a.d));
+  if(!data.length) return '';
+  const max = Math.max(...data.map(x=>Math.abs(x.d))) || 1;
+  const W=720, C=330, half=210, rowH=30, H=data.length*rowH+30;
+  let body = `<line x1="${C}" y1="18" x2="${C}" y2="${H-6}" stroke="var(--line)" stroke-width="1"/>`;
+  data.forEach((x,i)=>{
+    const y = 22 + i*rowH;
+    const w = Math.max(1, Math.abs(x.d)/max*half);
+    const neg = x.d < 0;
+    body += `<text x="${C-half-12}" y="${y+12}" text-anchor="end" font-size="12" fill="var(--muted)">${svgEsc(x.label)}</text>`;
+    body += `<rect x="${neg?C-w:C}" y="${y}" width="${w}" height="16" rx="2" fill="${neg?'var(--teal)':'var(--brick)'}"><title>${money(x.d)}</title></rect>`;
+    body += `<text x="${neg?C-w-6:C+w+6}" y="${y+12}" text-anchor="${neg?'end':'start'}" font-size="11" font-weight="700" fill="${neg?'var(--teal)':'var(--brick)'}">${x.d>=0?'+':''}${money(x.d)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;overflow:visible;">
+    <g font-family="inherit">
+      <text x="${C-8}" y="12" text-anchor="end" font-size="11" fill="var(--teal)">← ahorro</text>
+      <text x="${C+8}" y="12" font-size="11" fill="var(--brick)">sobrecosto →</text>
+      ${body}
+    </g></svg>`;
+}
+
+/* Composicion 100%: en que se va cada peso, cotizado vs real */
+function ctrlChartComposition(quoted, real){
+  const build = (src)=>{
+    const parts = CHART_ROWS.map(([k,label])=>({label, v:Number(src?.[k])||0})).filter(p=>p.v>0);
+    const tot = parts.reduce((a,b)=>a+b.v,0);
+    return tot ? {parts, tot} : null;
+  };
+  const A = build(quoted), B = build(real);
+  if(!A) return '';
+  const COLORS = ['#2B5D9B','#2F6F62','#C08A3E','#A63A3A','#6B7A8D','#7E57A8'];
+  const W=720, L=80, bw=W-L-20, barH=30;
+  const strip = (set, y, name)=>{
+    if(!set) return `<text x="${L}" y="${y+20}" font-size="12" fill="var(--muted)">Sin datos reales</text>`;
+    let x=L, out=`<text x="${L-10}" y="${y+20}" text-anchor="end" font-size="12" fill="var(--muted)">${name}</text>`;
+    set.parts.forEach((p,i)=>{
+      const w = p.v/set.tot*bw;
+      out += `<rect x="${x}" y="${y}" width="${w}" height="${barH}" fill="${COLORS[i%COLORS.length]}"><title>${svgEsc(p.label)}: ${money(p.v)} (${(p.v/set.tot*100).toFixed(1)}%)</title></rect>`;
+      if(w>34) out += `<text x="${x+w/2}" y="${y+19}" text-anchor="middle" font-size="10" fill="#fff" font-weight="600">${(p.v/set.tot*100).toFixed(0)}%</text>`;
+      x += w;
+    });
+    return out;
+  };
+  const legend = A.parts.map((p,i)=>`<rect x="${L+i*112}" y="0" width="9" height="9" rx="2" fill="${COLORS[i%COLORS.length]}"/><text x="${L+i*112+14}" y="8" font-size="10.5" fill="var(--muted)">${svgEsc(p.label)}</text>`).join('');
+  return `<svg viewBox="0 0 ${W} 106" width="100%" style="display:block;overflow:visible;"><g font-family="inherit">
+    ${legend}${strip(A,22,'Cotizado')}${strip(B,64,'Real')}</g></svg>`;
+}
+
+function ctrlChartCard(title, sub, svg){
+  if(!svg) return '';
+  return `<div class="card crop" style="margin-bottom:16px;">
+    <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+    <div style="font-weight:700;font-size:13.5px;margin-bottom:2px;">${title}</div>
+    <div style="font-size:11.5px;color:var(--muted);margin-bottom:12px;">${sub}</div>
+    ${svg}</div>`;
+}
+
 function ctrlShowDetail(id){
   const h = (DB.controllerHistory||[]).find(x=>x.id===id);
   if(!h) return;
@@ -3343,10 +3467,34 @@ function ctrlShowDetail(id){
       ${diff!==null?`<div style="text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:14px;font-weight:700;color:${color};">${diff>=0?'+':''}${r.isPct?diff.toFixed(1)+'pp':money(diff)}</div>`:''}
     </div>`;
   }).join('');
+  const cvtDif = (h.real?.cvt!==null && h.real?.cvt!==undefined && h.quoted?.cvt) ? (h.real.cvt-h.quoted.cvt) : null;
+  const cvtPct = (cvtDif!==null && h.quoted?.cvt) ? cvtDif/h.quoted.cvt*100 : null;
+  const hcol = cvtPct===null ? 'var(--muted)' : (cvtPct<=0 ? 'var(--teal)' : 'var(--brick)');
+  const meta = [
+    h.modo ? 'Base: '+h.modo : null,
+    h.fuente && h.fuente!=='base de datos' ? 'Excel: '+h.fuente : null,
+    h.pedido_b31 ? 'B31: '+qty(h.pedido_b31) : null,
+    h.precio_cotizado ? 'Precio: '+money(h.precio_cotizado)+'/pza' : null,
+    h.real?.mc_formula ? 'MC% real: '+h.real.mc_formula : null
+  ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+
   document.getElementById('ctrl-detail-content').innerHTML = `
-    <h2>${h.quote_number} — ${h.product_name}</h2>
-    <div style="color:var(--muted);margin:-8px 0 16px;font-size:13px;">${h.client_name} · ${h.date} · ${qty(h.tier_qty)} pza</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:18px;">
+      <div>
+        <h2 style="margin:0 0 4px;">${h.quote_number} — ${h.product_name}</h2>
+        <div style="color:var(--muted);font-size:13px;">${h.client_name} · ${h.date} · ${qty(h.tier_qty)} pza</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);">Desviación del costo variable</div>
+        <div class="mono" style="font-size:30px;font-weight:700;color:${hcol};line-height:1.2;">${cvtPct!==null?(cvtPct>=0?'+':'')+cvtPct.toFixed(1)+'%':'—'}</div>
+        <div class="mono" style="font-size:12px;color:${hcol};">${cvtDif!==null?(cvtDif>=0?'+':'')+money(cvtDif):''}</div>
+      </div>
+    </div>
+    ${meta?`<div style="font-size:11.5px;color:var(--muted);margin:-8px 0 18px;">${meta}</div>`:''}
     <div style="display:grid;grid-template-columns:repeat(${keyRows.length},1fr);gap:12px;margin-bottom:20px;">${scorecards}</div>
+    ${ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado. El % de la derecha es la desviación.', ctrlChartBars(h.quoted, h.real))}
+    ${ctrlChartCard('Qué movió la desviación','Peso en pesos de cada rubro. A la izquierda lo que ahorraste, a la derecha lo que se te fue.', ctrlChartDeviation(h.quoted, h.real))}
+    ${ctrlChartCard('Composición del costo','En qué se va cada peso del costo variable, cotizado contra real.', ctrlChartComposition(h.quoted, h.real))}
     <table><thead><tr><th>Rubro</th><th style="text-align:right;">Cotizado</th><th style="text-align:right;">Real</th><th style="text-align:right;">Diferencia $</th><th style="text-align:right;">Diferencia %</th></tr></thead><tbody>
     ${rows.map(r=>{
       const diff = (r.real!==null&&r.real!==undefined&&r.cot!==null) ? r.real-r.cot : null;
