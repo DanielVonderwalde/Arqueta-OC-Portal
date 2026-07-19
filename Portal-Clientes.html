@@ -418,13 +418,20 @@ function renderMyOCs(client){
     ocs = allOcs.filter(o=>o.date_submitted>=cutoff);
   }
 
-  // Group by status
-  const groups = {pendiente:[], recibida:[], rechazada:[]};
-  ocs.forEach(o=>{ (groups[o.status]||groups.pendiente).push(o); });
-  const statusLabels = {pendiente:'Pendientes', recibida:'Aceptadas', rechazada:'Rechazadas'};
-  const statusColors = {pendiente:'var(--kraft)', recibida:'var(--teal)', rechazada:'#A63A3A'};
+  // Activas arriba. Facturadas y rechazadas se pliegan en el historial.
+  const ARCHIVADAS = ['facturada','rechazada'];
+  const groups = {pendiente:[], recibida:[]};
+  const archivo = [];
+  ocs.forEach(o=>{
+    if(ARCHIVADAS.includes(o.status)) archivo.push(o);
+    else (groups[o.status]||groups.pendiente).push(o);
+  });
+  const statusLabels = {pendiente:'Pendientes', recibida:'Aceptadas'};
+  const statusColors = {pendiente:'var(--kraft)', recibida:'var(--teal)'};
 
-  let html = '<h3 style="margin-top:0;">Mis órdenes ('+ocs.length+')</h3>';
+  const nActivas = groups.pendiente.length + groups.recibida.length;
+  let html = '<h3 style="margin-top:0;">Mis órdenes activas ('+nActivas+')</h3>';
+  if(!nActivas) html += '<div class="empty" style="padding:20px;">No tienes órdenes activas en este periodo.</div>';
   for(const [status, list] of Object.entries(groups)){
     if(!list.length) continue;
     html += '<div style="margin-bottom:18px;"><div style="font-weight:700;font-size:13px;color:'+statusColors[status]+';margin-bottom:8px;">'+statusLabels[status]+' ('+list.length+')</div>';
@@ -443,8 +450,36 @@ function renderMyOCs(client){
     });
     html += '</tbody></table></div>';
   }
+
+  if(archivo.length){
+    const totalFact = archivo.reduce((s,o)=>s+(o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0)*1.16, 0);
+    const nFact = archivo.filter(o=>o.status==='facturada').length;
+    html += '<div style="margin-top:22px;border-top:2px solid var(--line);padding-top:14px;">'
+      + '<div onclick="toggleHistorialOC()" style="display:flex;justify-content:space-between;align-items:center;gap:12px;cursor:pointer;">'
+      + '<div style="font-weight:700;font-size:13px;color:var(--muted);">'+(historialAbierto?'▾':'▸')+' Historial — '+nFact+' facturada(s)'
+      + (archivo.length-nFact ? ' · '+(archivo.length-nFact)+' rechazada(s)' : '')+'</div>'
+      + '<div style="font-size:11.5px;color:var(--muted);">'+money(totalFact)+' · clic para '+(historialAbierto?'ocultar':'ver')+'</div></div>';
+    if(historialAbierto){
+      html += '<table style="margin-top:10px;"><thead><tr><th>OC</th><th>Fecha</th><th>Factura</th><th style="text-align:right;">Total con IVA</th><th>Estado</th><th>Archivo</th></tr></thead><tbody>';
+      archivo.forEach(o=>{
+        const sub = (o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0);
+        const est = o.status==='facturada'
+          ? '<span class="badge" style="font-size:10px;background:#EEF2F7;color:#6B7A8D;">Facturada</span>'
+          : '<span class="badge" style="font-size:10px;background:#FBEDEA;color:#A63A3A;">Rechazada</span>';
+        html += '<tr style="font-size:12px;"><td class="mono">'+o.oc_number+'</td><td>'+(o.date_submitted||'—')+'</td>'
+          + '<td class="mono" style="font-size:11px;">'+(o.factura_numero||'—')+'</td>'
+          + '<td style="text-align:right;font-weight:600;">'+money(sub*1.16)+'</td><td>'+est+'</td>'
+          + '<td>'+(o.fileName?'<a href="#" onclick="downloadOCFile(\''+o.id+'\',\''+o.fileName+'\');return false;" style="color:var(--kraft);font-size:11px;">archivo</a>':'—')+'</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+  }
   wrap.innerHTML = html;
 }
+
+let historialAbierto = false;
+function toggleHistorialOC(){ historialAbierto = !historialAbierto; if(currentClient) renderMyOCs(currentClient); }
 
 
 function notifyNewOC(ocNumber, lines, clientName, fileData, fileName, urgente, fechaDeseada){
