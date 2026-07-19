@@ -269,8 +269,8 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item" data-view="clientes" onclick="goTo('clientes')"><span class="ic">◇</span> Clientes</div>
     <div class="nav-item" data-view="cotizaciones" onclick="goTo('cotizaciones')"><span class="ic">▤</span> Cotizaciones</div>
     <div class="nav-item" data-view="ordenes" onclick="goTo('ordenes')"><span class="ic">▥</span> Órdenes de compra</div>
-    <div class="nav-item" data-view="comparar" onclick="goTo('comparar')" class="admin-only"><span class="ic">⇄</span> Controller</div>
-    <div class="nav-item" data-view="portal" onclick="goTo('portal')" class="admin-only"><span class="ic">⌁</span> Portal clientes</div>
+    <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
+    <div class="nav-item admin-only" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
@@ -618,16 +618,25 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
           <div class="field"><label>Cotización</label><select id="ctrl-quote" onchange="ctrlQuoteChanged()"><option value="">Selecciona cotización...</option></select></div>
         </div>
         <div class="formrow" style="grid-template-columns:1fr 1fr;gap:12px;">
-          <div class="field"><label>Cantidad a comparar (pza)</label><input type="number" id="ctrl-tier" placeholder="Ej: 120000" onchange="ctrlTierChanged()"></div>
-          <div class="field"><label>Precio cotizado por pieza</label><input type="number" step="0.01" id="ctrl-quoted-price" placeholder="Se llena del Excel o automático" readonly style="background:var(--paper-raised);"></div>
+          <div class="field"><label>Cantidad a comparar (pza)</label><input type="number" id="ctrl-tier" placeholder="Se llena del Job o escríbela" onchange="ctrlTierChanged()"></div>
+          <div class="field"><label>Precio cotizado por pieza</label><input type="number" step="0.01" id="ctrl-quoted-price" placeholder="Automático" readonly style="background:var(--paper-raised);"></div>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:-4px 0 10px;cursor:pointer;">
+          <input type="checkbox" id="ctrl-qty-from-job" checked>
+          Tomar la cantidad automáticamente del Job seleccionado (columna AG — QTY/PRO)
+        </label>
         <div id="ctrl-qty-warning" style="display:none;"></div>
-        <div class="upload-box" style="text-align:left;display:flex;align-items:center;justify-content:space-between;margin-top:12px;border-color:var(--teal);">
-          <div>
-            <strong style="color:var(--teal);">Subir Excel de cotización (opcional)</strong>
-            <div style="margin-top:2px;font-size:12px;">Para cálculo exacto: modifica PEDIDO B31 con la cantidad y sube el Excel. Si no, usa el tier más cercano.</div>
+        <div class="upload-box" style="text-align:left;margin-top:12px;border-color:var(--teal);">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:260px;">
+              <strong style="color:var(--teal);">Desglose de costo cotizado</strong>
+              <div style="margin-top:2px;font-size:12px;">Se carga solo desde la base de datos. Si la cantidad no es un escalon cotizado, se modela costo fijo + costo variable con los escalones existentes.</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-secondary" style="white-space:nowrap;" onclick="ctrlLoadStoredExcel()">Usar Excel guardado</button>
+              <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;">Subir otro Excel<input type="file" id="ctrl-quote-excel" accept=".xlsx,.xls" style="display:none;" onchange="ctrlLoadQuoteExcel(this)"></label>
+            </div>
           </div>
-          <label class="btn btn-secondary" style="cursor:pointer;white-space:nowrap;">Elegir Excel<input type="file" id="ctrl-quote-excel" accept=".xlsx,.xls" style="display:none;" onchange="ctrlLoadQuoteExcel(this)"></label>
         </div>
         <div class="small-note" id="ctrl-quote-excel-status" style="margin-top:6px;"></div>
       </div>
@@ -692,8 +701,27 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
           <h2 style="margin:0;">Comparaciones guardadas</h2>
-          <button class="btn btn-secondary" style="font-size:12px;" onclick="ctrlExportHistory()">⬇ Exportar a Excel</button>
+          <button class="btn btn-primary" style="font-size:12px;" onclick="ctrlExportHistory()">⬇ Exportar reporte a Excel</button>
         </div>
+        <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;align-items:end;">
+          <div class="field" style="margin:0;"><label>Periodo</label>
+            <select id="ctrl-f-preset" onchange="ctrlPresetChanged()">
+              <option value="all">Todo</option>
+              <option value="thismonth">Mes actual</option>
+              <option value="lastmonth">Mes pasado</option>
+              <option value="30">Últimos 30 días</option>
+              <option value="90">Últimos 90 días</option>
+              <option value="180">Últimos 180 días</option>
+              <option value="365">Último año</option>
+              <option value="ytd">Año en curso</option>
+              <option value="custom">Personalizado</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;"><label>Desde</label><input type="date" id="ctrl-f-from" onchange="ctrlCustomDates()"></div>
+          <div class="field" style="margin:0;"><label>Hasta</label><input type="date" id="ctrl-f-to" onchange="ctrlCustomDates()"></div>
+          <div class="field" style="margin:0;"><label>Cliente</label><select id="ctrl-f-client" onchange="ctrlRenderHistory()"><option value="">Todos</option></select></div>
+        </div>
+        <div class="small-note" id="ctrl-f-summary" style="margin:4px 0 12px;"></div>
         <div id="ctrl-history"></div>
       </div>
 
@@ -1116,6 +1144,12 @@ function applyRoleVisibility(){
   document.querySelectorAll('.admin-only').forEach(el=>{
     el.style.display = currentRole==='admin' ? '' : 'none';
   });
+  if(currentRole!=='admin'){
+    ADMIN_ONLY_VIEWS.forEach(v=>{
+      const el = document.getElementById('view-'+v);
+      if(el && el.classList.contains('active')){ el.classList.remove('active'); document.getElementById('view-inicio').classList.add('active'); }
+    });
+  }
   document.querySelectorAll('.zone-red').forEach(el=>{
     el.style.display = currentRole==='admin' ? '' : 'none';
   });
@@ -1202,7 +1236,12 @@ function exportOCReport(){
 /* =========================================================
    NAVIGATION
    ========================================================= */
+const ADMIN_ONLY_VIEWS = ['comparar','portal'];
 function goTo(view){
+  if(ADMIN_ONLY_VIEWS.includes(view) && currentRole!=='admin'){
+    showToast('Acceso restringido — solo administradores');
+    return;
+  }
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('view-'+view).classList.add('active');
@@ -1216,7 +1255,8 @@ function goTo(view){
   if(view==='portal') renderPortal();
 }
 function renderAll(){
-  renderInicio(); renderClientsList(); renderQuotesList(); renderPOList(); renderComparar(); renderPortal();
+  renderInicio(); renderClientsList(); renderQuotesList(); renderPOList();
+  if(currentRole==='admin'){ renderComparar(); renderPortal(); }
 }
 
 /* =========================================================
@@ -1889,6 +1929,42 @@ function reconstructPDFLines(items){
   return ys.map(y=> groups[y].sort((a,b)=>a.transform[4]-b.transform[4]).map(it=>it.str).join(' ').replace(/\s+/g,' ').trim()).filter(l=>l.length);
 }
 
+/* Lugar / Dirección de entrega — vive arriba a la derecha del PDF, así que
+   pdf.js a veces lo pega en la misma línea que texto de la columna izquierda,
+   y a veces lo deja en la línea siguiente. Probamos varias estrategias. */
+const LUGAR_LABELS = /(?:Direcci[oó]n|Lugar|Punto|Domicilio)\s+de\s+entrega|Lugar\s+de\s+entrega|Entregar\s+en|Destino|Plaza\s+de\s+entrega/i;
+const OTHER_LABELS = /^(?:Cliente|Referencia|Fecha|Vigencia|Moneda|Condiciones|N[uú]mero|Cantidad|Precio|Sustrato|Calibre|Gramaje|Tintas|Barniz|Acabado|Realces|Tiempo|Contacto|Vendedor|Atenci[oó]n|IVA|Total|Subtotal)\b/i;
+
+function cleanLugar(v){
+  if(!v) return null;
+  v = v.replace(/^[:\-–—\s]+/,'').replace(/\s+/g,' ').trim();
+  // corta si viene pegada otra etiqueta después del valor
+  v = v.split(/\s{2,}/)[0].trim();
+  v = v.replace(/\s*(?:Condiciones de Pago|Tiempo de Entrega|Moneda|Vigencia|Referencia|Cliente)\b.*$/i,'').trim();
+  if(!v || v.length < 3 || v.length > 90) return null;
+  if(OTHER_LABELS.test(v)) return null;
+  if(/^\d+$/.test(v)) return null;
+  if(/AFCOT|cotizaci[oó]n/i.test(v)) return null;
+  return v;
+}
+
+function extractLugarEntrega(lines){
+  for(let i=0;i<lines.length;i++){
+    const m = lines[i].match(LUGAR_LABELS);
+    if(!m) continue;
+    // 1) lo que sigue a la etiqueta en la misma línea
+    let after = lines[i].slice(m.index + m[0].length);
+    let val = cleanLugar(after);
+    if(val) return val;
+    // 2) la siguiente línea no vacía
+    for(let j=i+1;j<Math.min(i+3, lines.length);j++){
+      val = cleanLugar(lines[j]);
+      if(val) return val;
+    }
+  }
+  return null;
+}
+
 function extractQuoteDataFromPDFLines(lines){
   const result = {quote_number:null, reference:null, client_name:null, tiers:[]};
   ['sustrato','calibre','gramaje','tintas','barniz','acabado_spec','realces','entrega','lugar_entrega'].forEach(k=>result[k]=null);
@@ -1898,7 +1974,7 @@ function extractQuoteDataFromPDFLines(lines){
   result.quote_number = grab(/N[uú]mero de Cotizaci[oó]n:\s*([A-Z0-9\-]+)/i);
   result.client_name = grab(/Cliente:\s*(.+?)\s+Condiciones de Pago/i);
   result.reference = grab(/Referencia:\s*(.+)/i);
-  result.lugar_entrega = grab(/Direcci[oó]n de Entrega\s+(\S+.*?)$/im);
+  result.lugar_entrega = extractLugarEntrega(lines);
   result.entrega = grab(/(\d+\s*D[ií]as)/i);
 
   lines.forEach(line=>{
@@ -1939,6 +2015,7 @@ async function handlePDFAutofill(input){
       const content = await page.getTextContent();
       lines = lines.concat(reconstructPDFLines(content.items));
     }
+    window.__lastPdfLines = lines; // debug: escribe __lastPdfLines en la consola
     const ex = extractQuoteDataFromPDFLines(lines);
 
     if(ex.quote_number && !document.getElementById('mq-number').value) document.getElementById('mq-number').value = ex.quote_number;
@@ -2630,6 +2707,12 @@ function renderComparar(){
   const curVal = sel.value;
   sel.innerHTML = '<option value="">Selecciona cliente...</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   sel.value = curVal;
+  const fsel = document.getElementById('ctrl-f-client');
+  if(fsel){
+    const fv = fsel.value;
+    fsel.innerHTML = '<option value="">Todos</option>' + DB.clients.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+    fsel.value = fv;
+  }
   // Render saved comparisons
   ctrlRenderHistory();
 }
@@ -2642,20 +2725,23 @@ function ctrlClientChanged(){
 }
 function ctrlQuoteChanged(){
   const qid = document.getElementById('ctrl-quote').value;
-  const tiers = qid ? tiersForQuote(qid) : [];
+  const tiers = qid ? tiersForQuote(qid).filter(t=>!t.blended) : [];
   const tierInput = document.getElementById('ctrl-tier');
   tierInput.value = '';
+  ctrlExcelTiers = null;
+  document.getElementById('ctrl-quote-excel-status').textContent = tiers.length
+    ? 'Desglose en base de datos para: ' + tiers.map(t=>qty(t.quantity_tier)).join(' · ') + ' pza'
+    : 'Esta cotizacion no tiene desglose de costo guardado. Sube el Excel o cargalo desde Cotizaciones.';
   tierInput.placeholder = tiers.length ? 'Cantidades cotizadas: '+tiers.map(t=>qty(t.quantity_tier)).join(', ') : 'Ej: 35000';
-  document.getElementById('ctrl-comparison').style.display = 'none';
+  // Se muestra ya el paso 2 para poder cargar Jobs y que la cantidad venga de ahi
+  document.getElementById('ctrl-comparison').style.display = qid ? '' : 'none';
+  ctrlRenderComparison();
 }
 function ctrlTierChanged(){
   const qid = document.getElementById('ctrl-quote').value;
   const tierQty = Number(document.getElementById('ctrl-tier').value);
   if(!qid || !tierQty) return;
-  ctrlExactQuotedData = null; // Reset exact data — need fresh parse
-  document.getElementById('ctrl-quote-excel-status').textContent = '';
   document.getElementById('ctrl-comparison').style.display = '';
-  ctrlClear();
   ctrlRenderComparison();
 }
 function ctrlClear(){
@@ -2729,6 +2815,11 @@ function ctrlJobSelected(){
 
   // Auto-fill all real fields
   document.getElementById('ctrl-real-qty').value = j.qty_pro || '';
+  // La cantidad a comparar sale del Job (AG = QTY/PRO) salvo que se desactive
+  const autoQty = document.getElementById('ctrl-qty-from-job');
+  if(autoQty && autoQty.checked && j.qty_pro){
+    document.getElementById('ctrl-tier').value = j.qty_pro;
+  }
   document.getElementById('ctrl-real-venta').value = j.invoicing || '';
   document.getElementById('ctrl-real-mc').value = j.mc_pct ? (j.mc_pct*100).toFixed(1) : '';
   document.getElementById('ctrl-real-precio').value = (j.qty_pro && j.invoicing) ? (j.invoicing/j.qty_pro).toFixed(2) : '';
@@ -2744,7 +2835,44 @@ function ctrlJobSelected(){
   ctrlRenderComparison();
   showToast('Datos del Job '+j.job+' cargados');
 }
-let ctrlExactQuotedData = null;
+let ctrlExcelTiers = null;   // escalones leidos de un Excel (nube o subido)
+
+function ctrlTiersInUse(){
+  if(ctrlExcelTiers && ctrlExcelTiers.length) return ctrlExcelTiers;
+  const qid = document.getElementById('ctrl-quote').value;
+  return qid ? tiersForQuote(qid).filter(t=>!t.blended) : [];
+}
+
+/* Carga el Excel que ya esta guardado en la nube para esa cotizacion.
+   Asi no hay que volver a subirlo y alguien sin los archivos puede comparar. */
+async function ctrlLoadStoredExcel(){
+  const qid = document.getElementById('ctrl-quote').value;
+  const statusEl = document.getElementById('ctrl-quote-excel-status');
+  if(!qid){ showToast('Selecciona primero una cotizacion'); return; }
+  const q = quoteById(qid);
+  statusEl.textContent = 'Buscando el Excel guardado...';
+  try{
+    let data = q && q.excelData;
+    if(!data || data==='[cloud]' || data.length<100){
+      const snap = await fbFilesRef.child('xls_'+qid).once('value');
+      const f = snap.val();
+      data = f && f.data;
+    }
+    if(!data){ statusEl.textContent = 'Esta cotizacion no tiene Excel guardado en la nube.'; return; }
+    const b64 = data.includes(',') ? data.split(',')[1] : data;
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    const wb = XLSX.read(arr, {type:'array'});
+    const tiers = extractCostBreakdownFromWorkbook(wb);
+    if(!tiers.length){ statusEl.textContent = 'El Excel guardado no trae cost breakdown legible.'; return; }
+    ctrlExcelTiers = tiers;
+    statusEl.textContent = 'Excel de la nube ('+(q.excelName||'cotizacion')+') — escalones: '+tiers.map(t=>qty(t.quantity_tier)).join(' · ')+' pza';
+    ctrlRenderComparison();
+    showToast('Excel cargado desde la nube');
+  }catch(e){ statusEl.textContent = 'Error al leer el Excel guardado: '+e.message; }
+}
+
 function ctrlLoadQuoteExcel(input){
   const file = input.files[0];
   if(!file) return;
@@ -2755,58 +2883,119 @@ function ctrlLoadQuoteExcel(input){
     try{
       const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
       const tiers = extractCostBreakdownFromWorkbook(wb);
-      const inputQty = Number(document.getElementById('ctrl-tier').value);
-      if(!tiers.length){ statusEl.textContent = 'No se encontró cost breakdown.'; return; }
-      let tier = tiers.find(t=>t.quantity_tier===inputQty) || tiers[0];
-      ctrlExactQuotedData = {
-        cantidad: tier.quantity_tier, cantidad_cotizada: tier.quantity_tier, es_exacta: true,
-        papel: tier.sustrato||0, acabado: tier.acabado||0, materiales: tier.materiales||0,
-        insumos: (tier.sustrato||0)+(tier.acabado||0)+(tier.materiales||0),
-        mod: tier.mod||0, ee: tier.ee||0, overhead: tier.extras||0,
-        cvt: (tier.sustrato||0)+(tier.acabado||0)+(tier.materiales||0)+(tier.mod||0)+(tier.ee||0)+(tier.extras||0)+(tier.transporte||0),
-        venta: tier.valor_venta_total||0,
-        mc: tier.margen ? tier.margen*100 : 0,
-        precio: tier.precio_pieza || (tier.valor_venta_total && tier.quantity_tier ? tier.valor_venta_total/tier.quantity_tier : 0)
-      };
-      document.getElementById('ctrl-quoted-price').value = ctrlExactQuotedData.precio ? ctrlExactQuotedData.precio.toFixed(2) : '';
-      document.getElementById('ctrl-qty-warning').style.display = 'none';
-      statusEl.textContent = 'Cost breakdown exacto cargado para '+qty(tier.quantity_tier)+' pza';
+      if(!tiers.length){ statusEl.textContent = 'No se encontro cost breakdown.'; return; }
+      ctrlExcelTiers = tiers;
+      statusEl.textContent = 'Excel '+file.name+' — escalones: '+tiers.map(t=>qty(t.quantity_tier)).join(' · ')+' pza';
       ctrlRenderComparison();
-      showToast('Cost breakdown exacto cargado');
+      showToast('Cost breakdown cargado');
     }catch(err){ statusEl.textContent = 'Error: '+err.message; }
   };
   reader.readAsArrayBuffer(file);
 }
+
+/* Modelo costo fijo + costo variable.
+   Cada rubro se ajusta por minimos cuadrados sobre los escalones cotizados:
+       costo(q) = fijo + variable * q
+   Con eso se evalua CUALQUIER cantidad (p.ej. 120,260) sin recalcular el Excel. */
+function ctrlFitLinear(points){
+  const n = points.length;
+  if(n===0) return {a:0,b:0};
+  if(n===1) return {a:0, b: points[0].x ? points[0].y/points[0].x : 0};
+  const mx = points.reduce((s,p)=>s+p.x,0)/n;
+  const my = points.reduce((s,p)=>s+p.y,0)/n;
+  let num=0, den=0;
+  points.forEach(p=>{ num += (p.x-mx)*(p.y-my); den += (p.x-mx)*(p.x-mx); });
+  if(den===0) return {a:my, b:0};
+  const b = num/den;
+  return {a: my - b*mx, b};
+}
+function ctrlModelComponent(tiers, key, targetQty){
+  const pts = tiers.filter(t=>Number(t[key])>0).map(t=>({x:Number(t.quantity_tier), y:Number(t[key])}));
+  if(!pts.length) return 0;
+  const {a,b} = ctrlFitLinear(pts);
+  return Math.max(0, a + b*targetQty);
+}
+
 function ctrlGetQuotedData(){
-  if(ctrlExactQuotedData) return ctrlExactQuotedData;
   const qid = document.getElementById('ctrl-quote').value;
   const inputQty = Number(document.getElementById('ctrl-tier').value);
-  if(!qid || !inputQty) return null;
-  const tiers = tiersForQuote(qid).filter(t=>!t.blended);
-  if(!tiers.length) return null;
-  let tier = tiers.find(t=>t.quantity_tier===inputQty);
-  let isExact = !!tier;
-  if(!tier) tier = tiers.reduce((best,t)=> Math.abs(t.quantity_tier-inputQty) < Math.abs(best.quantity_tier-inputQty) ? t : best);
   const warn = document.getElementById('ctrl-qty-warning');
-  if(!isExact){
-    warn.innerHTML = '<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">La cantidad <strong>'+qty(inputQty)+'</strong> no tiene cotización exacta. Se usa <strong>'+qty(tier.quantity_tier)+' pza</strong>. Sube el Excel con esta cantidad para cálculo exacto.</div>';
-    warn.style.display = '';
-  } else { warn.style.display = 'none'; }
-  document.getElementById('ctrl-quoted-price').value = pricePerPiece(tier) ? pricePerPiece(tier).toFixed(2) : '';
-  return {
-    cantidad: inputQty, cantidad_cotizada: tier.quantity_tier, es_exacta: isExact,
-    papel: tier.sustrato||0, acabado: tier.acabado||0, materiales: tier.materiales||0,
-    insumos: (tier.sustrato||0)+(tier.acabado||0)+(tier.materiales||0),
-    mod: tier.mod||0, ee: tier.ee||0, overhead: tier.extras||0,
-    cvt: costoVariableTotal(tier), venta: tier.valor_venta_total||0,
-    mc: tier.margen ? tier.margen*100 : marginPct(tier),
-    precio: pricePerPiece(tier)
+  if(!qid || !inputQty){ if(warn) warn.style.display='none'; return null; }
+  const tiers = ctrlTiersInUse();
+  if(!tiers.length){ if(warn) warn.style.display='none'; return null; }
+
+  const build = (o, modo, refQty) => ({
+    cantidad: inputQty, cantidad_cotizada: refQty, es_exacta: modo==='exacta', modo,
+    papel:o.papel, acabado:o.acabado, materiales:o.materiales,
+    insumos:o.papel+o.acabado+o.materiales,
+    mod:o.mod, ee:o.ee, overhead:o.overhead,
+    cvt:o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte,
+    venta:o.venta, mc:o.mc, precio:o.precio
+  });
+
+  // 1) Coincidencia exacta con un escalon cotizado
+  const exact = tiers.find(t=>Number(t.quantity_tier)===inputQty);
+  if(exact){
+    if(warn) warn.style.display='none';
+    const o = {
+      papel:Number(exact.sustrato)||0, acabado:Number(exact.acabado)||0, materiales:Number(exact.materiales)||0,
+      mod:Number(exact.mod)||0, ee:Number(exact.ee)||0, overhead:Number(exact.extras)||0,
+      transporte:Number(exact.transporte)||0, venta:Number(exact.valor_venta_total)||0
+    };
+    o.mc = exact.margen ? exact.margen*100 : (o.venta ? ((o.venta-(o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte))/o.venta*100) : 0);
+    o.precio = o.venta && inputQty ? o.venta/inputQty : 0;
+    document.getElementById('ctrl-quoted-price').value = o.precio ? o.precio.toFixed(2) : '';
+    return build(o,'exacta',inputQty);
+  }
+
+  // 2) Modelo fijo + variable (necesita al menos 2 escalones)
+  if(tiers.length>=2){
+    const qs = tiers.map(t=>Number(t.quantity_tier));
+    const dentro = inputQty>=Math.min(...qs) && inputQty<=Math.max(...qs);
+    const o = {
+      papel: ctrlModelComponent(tiers,'sustrato',inputQty),
+      acabado: ctrlModelComponent(tiers,'acabado',inputQty),
+      materiales: ctrlModelComponent(tiers,'materiales',inputQty),
+      mod: ctrlModelComponent(tiers,'mod',inputQty),
+      ee: ctrlModelComponent(tiers,'ee',inputQty),
+      overhead: ctrlModelComponent(tiers,'extras',inputQty),
+      transporte: ctrlModelComponent(tiers,'transporte',inputQty),
+      venta: ctrlModelComponent(tiers,'valor_venta_total',inputQty)
+    };
+    const cvt = o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte;
+    o.mc = o.venta ? (o.venta-cvt)/o.venta*100 : 0;
+    o.precio = o.venta && inputQty ? o.venta/inputQty : 0;
+    document.getElementById('ctrl-quoted-price').value = o.precio ? o.precio.toFixed(2) : '';
+    if(warn){
+      warn.innerHTML = '<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">'
+        + (dentro ? 'Cantidad <strong>'+qty(inputQty)+'</strong> INTERPOLADA' : 'Cantidad <strong>'+qty(inputQty)+'</strong> EXTRAPOLADA (fuera del rango cotizado '+qty(Math.min(...qs))+'–'+qty(Math.max(...qs))+')')
+        + ' con el modelo costo fijo + costo variable sobre '+tiers.length+' escalones. No es un escalon cotizado directo.</div>';
+      warn.style.display='';
+    }
+    return build(o, dentro?'interpolada':'extrapolada', inputQty);
+  }
+
+  // 3) Un solo escalon: se usa el mas cercano tal cual
+  const t = tiers[0];
+  const o = {
+    papel:Number(t.sustrato)||0, acabado:Number(t.acabado)||0, materiales:Number(t.materiales)||0,
+    mod:Number(t.mod)||0, ee:Number(t.ee)||0, overhead:Number(t.extras)||0,
+    transporte:Number(t.transporte)||0, venta:Number(t.valor_venta_total)||0
   };
+  o.mc = t.margen ? t.margen*100 : 0;
+  o.precio = pricePerPiece(t);
+  document.getElementById('ctrl-quoted-price').value = o.precio ? o.precio.toFixed(2) : '';
+  if(warn){
+    warn.innerHTML = '<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">Solo hay un escalon cotizado ('+qty(t.quantity_tier)+' pza). Se usa tal cual — carga mas escalones para poder interpolar.</div>';
+    warn.style.display='';
+  }
+  return build(o,'aproximada',Number(t.quantity_tier));
 }
 function ctrlRenderComparison(){
   const quoted = ctrlGetQuotedData();
   if(!quoted){ document.getElementById('ctrl-scorecards').innerHTML=''; document.getElementById('ctrl-table').innerHTML=''; return; }
-  const matchNote = quoted.es_exacta ? '' : `<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;">⚠ La cantidad <strong>${qty(quoted.cantidad)}</strong> no tiene cotización exacta — se usa la más cercana: <strong>${qty(quoted.cantidad_cotizada)} pza</strong>. Para un cálculo exacto, sube el Excel con esta cantidad en PEDIDO B31.</div>`;
+  const MODO_LBL = {exacta:'Escalón cotizado exacto', interpolada:'Interpolado (fijo + variable)', extrapolada:'Extrapolado (fuera del rango cotizado)', aproximada:'Escalón más cercano'};
+  const matchNote = `<div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);">Base del cotizado para ${qty(quoted.cantidad)} pza: <strong>${MODO_LBL[quoted.modo]||quoted.modo}</strong></div>`;
   const real = {};
   ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
     const v = document.getElementById('ctrl-real-'+f).value;
@@ -2883,15 +3072,54 @@ function ctrlSave(){
   DB.controllerHistory.push({
     id: uid('ctrl'), date: new Date().toISOString().slice(0,10),
     client_name: cl?.name||'', quote_number: q?.quote_number||'', product_name: q?.product_name||'',
-    quote_id: qid, tier_qty: tierQty,
+    quote_id: qid, tier_qty: tierQty, modo: quoted?.modo || '',
     quoted: quoted, real: real
   });
   saveData(); showToast('Comparación guardada'); ctrlRenderHistory();
 }
+function ctrlPresetChanged(){
+  const p = document.getElementById('ctrl-f-preset').value;
+  const from = document.getElementById('ctrl-f-from'), to = document.getElementById('ctrl-f-to');
+  const iso = d => d.toISOString().slice(0,10);
+  const now = new Date();
+  if(p==='custom'){ ctrlRenderHistory(); return; }
+  if(p==='all'){ from.value=''; to.value=''; }
+  else if(p==='thismonth'){ from.value=iso(new Date(now.getFullYear(),now.getMonth(),1)); to.value=iso(new Date(now.getFullYear(),now.getMonth()+1,0)); }
+  else if(p==='lastmonth'){ from.value=iso(new Date(now.getFullYear(),now.getMonth()-1,1)); to.value=iso(new Date(now.getFullYear(),now.getMonth(),0)); }
+  else if(p==='ytd'){ from.value=iso(new Date(now.getFullYear(),0,1)); to.value=iso(now); }
+  else { const d=new Date(now); d.setDate(d.getDate()-Number(p)); from.value=iso(d); to.value=iso(now); }
+  ctrlRenderHistory();
+}
+function ctrlCustomDates(){
+  document.getElementById('ctrl-f-preset').value='custom';
+  ctrlRenderHistory();
+}
+function ctrlFilteredHistory(){
+  const from = (document.getElementById('ctrl-f-from')||{}).value || '';
+  const to   = (document.getElementById('ctrl-f-to')||{}).value || '';
+  const cli  = (document.getElementById('ctrl-f-client')||{}).value || '';
+  return (DB.controllerHistory||[]).filter(h=>{
+    const d = h.date || '';
+    if(from && d < from) return false;
+    if(to && d > to) return false;
+    if(cli && h.client_name !== cli) return false;
+    return true;
+  }).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+}
 function ctrlRenderHistory(){
-  const list = (DB.controllerHistory||[]).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const list = ctrlFilteredHistory();
   const wrap = document.getElementById('ctrl-history');
-  if(!list.length){ wrap.innerHTML='<div class="empty" style="padding:20px;">Sin comparaciones guardadas</div>'; return; }
+  const sum = document.getElementById('ctrl-f-summary');
+  if(sum){
+    const withCvt = list.filter(h=>h.quoted?.cvt && h.real?.cvt!==null && h.real?.cvt!==undefined);
+    const totCot = withCvt.reduce((s,h)=>s+h.quoted.cvt,0);
+    const totReal = withCvt.reduce((s,h)=>s+h.real.cvt,0);
+    const desv = totCot ? ((totReal-totCot)/totCot*100) : null;
+    sum.innerHTML = list.length
+      ? `${list.length} comparación(es) · CVT cotizado ${money(totCot)} · CVT real ${money(totReal)} · desviación <strong style="color:${desv<=0?'var(--teal)':'var(--brick)'}">${desv!==null?(desv>=0?'+':'')+desv.toFixed(1)+'%':'—'}</strong>`
+      : '';
+  }
+  if(!list.length){ wrap.innerHTML='<div class="empty" style="padding:20px;">Sin comparaciones en este filtro</div>'; return; }
   wrap.innerHTML = `<table><thead><tr><th>Fecha</th><th>Cliente</th><th>Cotización</th><th>Producto</th><th>Cantidad</th><th>CVT Cotizado</th><th>CVT Real</th><th>Desviación</th><th></th></tr></thead><tbody>
   ${list.map(h=>{
     const diff = (h.real?.cvt!==null && h.real?.cvt!==undefined && h.quoted?.cvt) ? ((h.real.cvt-h.quoted.cvt)/h.quoted.cvt*100) : null;
@@ -2953,23 +3181,105 @@ function ctrlShowDetail(id){
   document.getElementById('modal-ctrl-detail').classList.add('active');
 }
 function ctrlExportHistory(){
-  const list = (DB.controllerHistory||[]);
-  if(!list.length){ showToast('Sin comparaciones para exportar'); return; }
-  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Papel Cot','Papel Real','Acabado Cot','Acabado Real','Materiales Cot','Materiales Real','Insumos Cot','Insumos Real','MOD Cot','MOD Real','EE Cot','EE Real','Overhead Cot','Overhead Real','CVT Cot','CVT Real','Venta Cot','Venta Real','MC% Cot','MC% Real'];
-  const rows = [headers];
-  list.forEach(h=>{
-    rows.push([h.date, h.client_name, h.quote_number, h.product_name, h.tier_qty,
-      h.quoted?.papel, h.real?.papel, h.quoted?.acabado, h.real?.acabado,
-      h.quoted?.materiales, h.real?.materiales, h.quoted?.insumos, h.real?.insumos,
-      h.quoted?.mod, h.real?.mod, h.quoted?.ee, h.real?.ee,
-      h.quoted?.overhead, h.real?.overhead, h.quoted?.cvt, h.real?.cvt,
-      h.quoted?.venta, h.real?.venta, h.quoted?.mc, h.real?.mc]);
+  const list = ctrlFilteredHistory();
+  if(!list.length){ showToast('Sin comparaciones en el filtro seleccionado'); return; }
+  const from = (document.getElementById('ctrl-f-from')||{}).value || '(inicio)';
+  const to   = (document.getElementById('ctrl-f-to')||{}).value || '(hoy)';
+  const cli  = (document.getElementById('ctrl-f-client')||{}).value || 'Todos los clientes';
+  const n = v => (v===null||v===undefined||v==='') ? null : Number(v);
+  const dif = (r,c) => (n(r)!==null && n(c)!==null) ? n(r)-n(c) : null;
+  const difp = (r,c) => (n(r)!==null && n(c)) ? (n(r)-n(c))/n(c)*100 : null;
+
+  /* ---- Hoja 1: Resumen ejecutivo ---- */
+  const agg = k => ({
+    cot: list.reduce((s,h)=>s+(n(h.quoted?.[k])||0),0),
+    real: list.reduce((s,h)=>s+(n(h.real?.[k])||0),0)
   });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const rubros = [['Papel/Sustrato','papel'],['Acabado','acabado'],['Materiales','materiales'],
+    ['Total Insumos','insumos'],['MOD','mod'],['EE/Máquinas','ee'],['Overhead','overhead'],
+    ['Costo Variable Total','cvt'],['Valor de Venta','venta']];
+  const resumen = [
+    ['ARQUETA FOLDING — Reporte Controller: cotizado vs real'],
+    ['Generado', new Date().toLocaleString('es-MX')],
+    ['Periodo', from + '  a  ' + to],
+    ['Cliente', cli],
+    ['Comparaciones', list.length],
+    [],
+    ['Rubro','Cotizado','Real','Diferencia $','Diferencia %']
+  ];
+  rubros.forEach(([label,key])=>{
+    const a = agg(key);
+    resumen.push([label, a.cot, a.real, a.real-a.cot, a.cot ? (a.real-a.cot)/a.cot*100 : null]);
+  });
+  const vCot = agg('venta'), cCot = agg('cvt');
+  resumen.push([]);
+  resumen.push(['MC% promedio cotizado', vCot.cot ? (vCot.cot-cCot.cot)/vCot.cot*100 : null]);
+  resumen.push(['MC% promedio real',     vCot.real ? (vCot.real-cCot.real)/vCot.real*100 : null]);
+  resumen.push(['Piezas comparadas', list.reduce((s,h)=>s+(n(h.tier_qty)||0),0)]);
+  const overs = list.filter(h=>difp(h.real?.cvt,h.quoted?.cvt)>0).length;
+  resumen.push(['Jobs por ARRIBA del costo cotizado', overs]);
+  resumen.push(['Jobs por DEBAJO o en costo', list.length-overs]);
+
+  /* ---- Hoja 2: Detalle ---- */
+  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado'];
+  rubros.forEach(([label])=>headers.push(label+' Cot', label+' Real', label+' Dif $', label+' Dif %'));
+  headers.push('MC% Cot','MC% Real','MC% Dif (pp)','Precio/pza Cot','Precio/pza Real','Precio/pza Dif');
+  const detalle = [headers];
+  list.forEach(h=>{
+    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—'];
+    rubros.forEach(([label,key])=>{
+      row.push(n(h.quoted?.[key]), n(h.real?.[key]), dif(h.real?.[key],h.quoted?.[key]), difp(h.real?.[key],h.quoted?.[key]));
+    });
+    row.push(n(h.quoted?.mc), n(h.real?.mc), dif(h.real?.mc,h.quoted?.mc),
+             n(h.quoted?.precio), n(h.real?.precio), dif(h.real?.precio,h.quoted?.precio));
+    detalle.push(row);
+  });
+
+  /* ---- Hoja 3: Por cliente ---- */
+  const byClient = {};
+  list.forEach(h=>{
+    const k = h.client_name || '(sin cliente)';
+    if(!byClient[k]) byClient[k] = {n:0, qty:0, cvtCot:0, cvtReal:0, ventaCot:0, ventaReal:0};
+    const b = byClient[k];
+    b.n++; b.qty += n(h.tier_qty)||0;
+    b.cvtCot += n(h.quoted?.cvt)||0; b.cvtReal += n(h.real?.cvt)||0;
+    b.ventaCot += n(h.quoted?.venta)||0; b.ventaReal += n(h.real?.venta)||0;
+  });
+  const porCliente = [['Cliente','# Comparaciones','Piezas','CVT Cotizado','CVT Real','Desviación CVT %','Venta Cotizada','Venta Real','MC% Cot','MC% Real']];
+  Object.entries(byClient).sort((a,b)=>b[1].cvtReal-a[1].cvtReal).forEach(([name,b])=>{
+    porCliente.push([name, b.n, b.qty, b.cvtCot, b.cvtReal,
+      b.cvtCot ? (b.cvtReal-b.cvtCot)/b.cvtCot*100 : null,
+      b.ventaCot, b.ventaReal,
+      b.ventaCot ? (b.ventaCot-b.cvtCot)/b.ventaCot*100 : null,
+      b.ventaReal ? (b.ventaReal-b.cvtReal)/b.ventaReal*100 : null]);
+  });
+
+  /* ---- Hoja 4: Por mes ---- */
+  const byMonth = {};
+  list.forEach(h=>{
+    const k = (h.date||'').slice(0,7) || '(sin fecha)';
+    if(!byMonth[k]) byMonth[k] = {n:0, cvtCot:0, cvtReal:0, ventaCot:0, ventaReal:0};
+    const b = byMonth[k];
+    b.n++; b.cvtCot += n(h.quoted?.cvt)||0; b.cvtReal += n(h.real?.cvt)||0;
+    b.ventaCot += n(h.quoted?.venta)||0; b.ventaReal += n(h.real?.venta)||0;
+  });
+  const porMes = [['Mes','# Comparaciones','CVT Cotizado','CVT Real','Desviación %','Venta Cotizada','Venta Real']];
+  Object.keys(byMonth).sort().forEach(k=>{
+    const b = byMonth[k];
+    porMes.push([k, b.n, b.cvtCot, b.cvtReal, b.cvtCot ? (b.cvtReal-b.cvtCot)/b.cvtCot*100 : null, b.ventaCot, b.ventaReal]);
+  });
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Controller');
+  const s1 = XLSX.utils.aoa_to_sheet(resumen); s1['!cols']=[{wch:34},{wch:16},{wch:16},{wch:16},{wch:14}];
+  const s2 = XLSX.utils.aoa_to_sheet(detalle); s2['!cols']=headers.map(()=>({wch:15}));
+  const s3 = XLSX.utils.aoa_to_sheet(porCliente); s3['!cols']=[{wch:26}].concat(Array(9).fill({wch:16}));
+  const s4 = XLSX.utils.aoa_to_sheet(porMes); s4['!cols']=[{wch:12}].concat(Array(6).fill({wch:16}));
+  XLSX.utils.book_append_sheet(wb, s1, 'Resumen');
+  XLSX.utils.book_append_sheet(wb, s2, 'Detalle');
+  XLSX.utils.book_append_sheet(wb, s3, 'Por cliente');
+  XLSX.utils.book_append_sheet(wb, s4, 'Por mes');
   XLSX.writeFile(wb, 'Controller_Arqueta_'+new Date().toISOString().slice(0,10)+'.xlsx');
-  showToast('Reporte exportado');
+  showToast(list.length+' comparaciones exportadas');
 }
 function ctrlDelete(id){
   if(!confirm('¿Eliminar esta comparación?')) return;
