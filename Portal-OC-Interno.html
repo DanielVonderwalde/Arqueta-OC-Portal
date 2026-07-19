@@ -270,7 +270,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item" data-view="cotizaciones" onclick="goTo('cotizaciones')"><span class="ic">▤</span> Cotizaciones</div>
     <div class="nav-item" data-view="ordenes" onclick="goTo('ordenes')"><span class="ic">▥</span> Órdenes de compra</div>
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
-    <div class="nav-item admin-only" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
+    <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
@@ -1262,7 +1262,7 @@ function exportOCReport(){
 /* =========================================================
    NAVIGATION
    ========================================================= */
-const ADMIN_ONLY_VIEWS = ['comparar','portal'];
+const ADMIN_ONLY_VIEWS = ['comparar'];   // Portal clientes SI lo ve el asociado
 function goTo(view){
   if(ADMIN_ONLY_VIEWS.includes(view) && currentRole!=='admin'){
     showToast('Acceso restringido — solo administradores');
@@ -1282,7 +1282,8 @@ function goTo(view){
 }
 function renderAll(){
   renderInicio(); renderClientsList(); renderQuotesList(); renderPOList();
-  if(currentRole==='admin'){ renderComparar(); renderPortal(); }
+  renderPortal();
+  if(currentRole==='admin'){ renderComparar(); }
 }
 
 /* =========================================================
