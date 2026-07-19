@@ -238,6 +238,9 @@ function money(n){
 function qty(n){ return Number(n).toLocaleString('es-MX'); }
 function uid(p){ return p+'-'+Math.random().toString(36).slice(2,9); }
 const statusLabel = {vigente:'Vigente', borrador:'En preparación', vencida:'Vencida'};
+/* Las cotizaciones en borrador son internas: nunca se muestran al cliente. */
+const PORTAL_VISIBLE_STATUS = ['vigente','vencida'];
+const esVisibleParaCliente = q => PORTAL_VISIBLE_STATUS.includes(String(q.status||'').toLowerCase());
 
 function showToast(msg){
   const t=document.getElementById('toast');
@@ -283,7 +286,7 @@ function showPortal(client){
   document.getElementById('client-title').textContent = client.name;
   document.getElementById('who-client').textContent = client.portal_email;
 
-  const quotes = DB.quotes.filter(q=>q.client_id===client.id);
+  const quotes = DB.quotes.filter(q=>q.client_id===client.id && esVisibleParaCliente(q));
   const wrap = document.getElementById('quotes-container');
   if(!quotes.length){
     wrap.innerHTML = '<div class="empty"><div class="big">—</div>Aún no tienes cotizaciones registradas.</div>';
@@ -494,6 +497,7 @@ async function downloadPortalFile(quoteId, fileName){
   try{
     // Try memory first
     const q = (DB.quotes||[]).find(x=>x.id===quoteId);
+    if(q && !esVisibleParaCliente(q)){ showToast('Esta cotización no está disponible'); return; }
     if(q && q.pdfData && q.pdfData.length>100 && q.pdfData!=='[cloud]'){
       triggerDownload(q.pdfData, fileName);
       return;
