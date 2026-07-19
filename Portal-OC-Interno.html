@@ -2725,45 +2725,100 @@ async function downloadOCFile(ocId, fileName){
     }
   }catch(e){ console.error('Download error:',e); showToast('Error al descargar: '+e.message); }
 }
-function triggerDownload(dataUrl, fileName){
-  try{
-    const parts = dataUrl.split(',');
-    const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/octet-stream';
-    const byteStr = atob(parts[1]);
-    const ab = new ArrayBuffer(byteStr.length);
-    const ia = new Uint8Array(ab);
-    for(let i=0; i<byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
-    const blob = new Blob([ab], {type: mime});
-    const url = URL.createObjectURL(blob);
+/* ---------- Descarga de archivos, compatible con todos los navegadores ----------
+   Chrome mostraba "el archivo no se encontraba disponible en el sitio" porque el
+   blob URL se revocaba antes de que terminara de bajar. Ahora:
+   - acepta data URL o base64 pelón
+   - arma el Blob con fetch() (maneja archivos grandes sin trabar el hilo)
+   - valida que el archivo no venga vacío ANTES de disparar la descarga
+   - revoca el URL hasta que la descarga ya terminó
+   - si algo falla, deja un enlace visible para abrirlo a mano                  */
+const MIMES_POR_EXT = {pdf:'application/pdf', xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls:'application/vnd.ms-excel', csv:'text/csv', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg'};
 
-    // Safari needs special handling
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    if(isSafari){
-      // Safari: open blob in new tab, user saves from there
-      const newTab = window.open(url, '_blank');
-      if(!newTab) window.location.href = url;
-      showToast('Archivo abierto — usa Cmd+S para guardar');
-    } else {
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.style.display = 'none';
+function normalizeDataUrl(data, fileName){
+  if(!data) return null;
+  let s = String(data).trim();
+  if(s.startsWith('data:')) return s;
+  const ext = String(fileName||'').split('.').pop().toLowerCase();
+  return 'data:' + (MIMES_POR_EXT[ext] || 'application/octet-stream') + ';base64,' + s.replace(/\s+/g,'');
+}
+
+async function dataUrlToBlob(dataUrl){
+  try{
+    const res = await fetch(dataUrl);
+    const b = await res.blob();
+    if(b && b.size) return b;
+  }catch(_){}
+  const idx = dataUrl.indexOf(',');
+  const mime = (dataUrl.slice(0,idx).match(/:(.*?);/)||[])[1] || 'application/octet-stream';
+  const bin = atob(dataUrl.slice(idx+1));
+  const ia = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) ia[i] = bin.charCodeAt(i);
+  return new Blob([ia], {type: mime});
+}
+
+function nombreSeguro(fileName){
+  return String(fileName||'archivo').replace(/[\\/:*?"<>|\u0000-\u001F]+/g,'_').trim() || 'archivo';
+}
+
+function mostrarEnlaceRespaldo(url, fileName){
+  const prev = document.getElementById('dl-fallback'); if(prev) prev.remove();
+  const box = document.createElement('div');
+  box.id = 'dl-fallback';
+  box.style.cssText = 'position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:9999;background:#fff;border:1px solid #D8E0EA;border-radius:8px;padding:10px 16px;font-size:13px;box-shadow:0 6px 24px rgba(0,0,0,.14);display:flex;align-items:center;gap:12px;';
+  box.innerHTML = '<span>¿No se descargó?</span><a href="'+url+'" download="'+nombreSeguro(fileName)+'" target="_blank" rel="noopener" style="font-weight:700;color:#2B5D9B;">Abrir ' + nombreSeguro(fileName) + '</a>'
+    + '<button onclick="this.parentNode.remove()" style="border:none;background:none;cursor:pointer;font-size:16px;color:#6B7A8D;">&times;</button>';
+  document.body.appendChild(box);
+  setTimeout(()=>{ const b=document.getElementById('dl-fallback'); if(b) b.remove(); }, 45000);
+}
+
+async function triggerDownload(data, fileName){
+  const dataUrl = normalizeDataUrl(data, fileName);
+  if(!dataUrl || dataUrl.length < 200){
+    showToast('El archivo no se guardó completo. Vuelve a subirlo desde Cotizaciones.');
+    return;
+  }
+  let url = null;
+  try{
+    const blob = await dataUrlToBlob(dataUrl);
+    if(!blob || !blob.size){ showToast('El archivo llegó vacío desde la nube'); return; }
+    const safeName = nombreSeguro(fileName);
+
+    if(window.navigator && window.navigator.msSaveOrOpenBlob){   // Edge viejo / IE11
+      window.navigator.msSaveOrOpenBlob(blob, safeName);
+      showToast('Descarga iniciada');
+      return;
+    }
+
+    url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const soportaDownload = 'download' in a;
+    const esIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+
+    if(soportaDownload && !esIOS){
+      a.href = url; a.download = safeName; a.rel = 'noopener'; a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
-      setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 5000);
+      // Se revoca hasta mucho despues: revocarlo antes es lo que rompia Chrome
+      setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(_){} }, 120000);
       showToast('Descarga iniciada');
+      mostrarEnlaceRespaldo(url, safeName);
+    } else {
+      const w = window.open(url, '_blank');
+      if(!w) window.location.href = url;
+      setTimeout(()=>{ try{ URL.revokeObjectURL(url); }catch(_){} }, 120000);
+      showToast('Archivo abierto — guárdalo desde ahí');
     }
   }catch(e){
     console.error('Download error:', e);
-    // Final fallback: open data URL in new tab
-    try{
-      const w = window.open('', '_blank');
-      if(w){
-        w.document.write('<html><head><title>'+fileName+'</title></head><body style="margin:0;"><iframe src="'+dataUrl+'" style="width:100%;height:100vh;border:none;"></iframe></body></html>');
-        w.document.close();
-        showToast('Archivo abierto en nueva pestaña');
-      }
-    }catch(e2){ showToast('No se pudo abrir el archivo'); }
+    if(url) mostrarEnlaceRespaldo(url, fileName);
+    else{
+      try{
+        const w = window.open('', '_blank');
+        if(w){ w.document.write('<iframe src="'+dataUrl+'" style="width:100%;height:100vh;border:none;"></iframe>'); w.document.close(); showToast('Archivo abierto en nueva pestaña'); }
+        else showToast('No se pudo abrir el archivo: '+e.message);
+      }catch(_){ showToast('No se pudo abrir el archivo'); }
+    }
   }
 }
 function deletePO(id){
