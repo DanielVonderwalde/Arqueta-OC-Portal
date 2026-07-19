@@ -706,6 +706,13 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
               </div>
             </div>
           </details>
+          <div style="border-top:1px solid var(--line);margin:12px 0 10px;padding-top:10px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;">
+              <input type="checkbox" id="ctrl-mc-same" checked onchange="ctrlRenderComparison()">
+              Calcular el <strong>MC% real</strong> con la misma fórmula del cotizado: (venta &minus; CVT) &divide; venta
+            </label>
+            <div class="small-note" id="ctrl-mc-check" style="margin-top:6px;"></div>
+          </div>
           <div style="display:flex;gap:8px;">
             <button class="btn btn-primary" onclick="ctrlSave()">Guardar comparación</button>
             <button class="btn btn-secondary" onclick="ctrlClear()">Limpiar campos</button>
@@ -2776,6 +2783,7 @@ function ctrlClear(){
 }
 
 let ctrlJobsData = []; // Parsed jobs from Excel
+let ctrlJobMC = null;  // MC% tal como lo reporta el Job (columna Z)
 function ctrlLoadJobs(input){
   const file = input.files[0];
   if(!file) return;
@@ -2845,6 +2853,7 @@ function ctrlJobSelected(){
     document.getElementById('ctrl-tier').value = j.qty_pro;
   }
   document.getElementById('ctrl-real-venta').value = j.invoicing || '';
+  ctrlJobMC = j.mc_pct ? j.mc_pct*100 : null;   // MC% que reporta el Job (col Z)
   document.getElementById('ctrl-real-mc').value = j.mc_pct ? (j.mc_pct*100).toFixed(1) : '';
   document.getElementById('ctrl-real-precio').value = (j.qty_pro && j.invoicing) ? (j.invoicing/j.qty_pro).toFixed(2) : '';
   document.getElementById('ctrl-real-papel').value = j.paper || '';
@@ -3129,6 +3138,40 @@ function ctrlGetQuotedData(){
   }
   return build(o,'aproximada',Number(t.quantity_tier));
 }
+/* Lado real. Si el toggle esta activo, el MC% se recalcula con la misma
+   formula del cotizado en vez de usar la columna Z del Job. */
+function ctrlGetRealData(){
+  const real = {};
+  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
+    const v = document.getElementById('ctrl-real-'+f).value;
+    real[f] = v==='' ? null : Number(v);
+  });
+  real.mc_reportado = ctrlJobMC;
+  const same = (document.getElementById('ctrl-mc-same')||{}).checked;
+  real.mc_formula = same ? 'calculado' : 'reportado (col Z)';
+  if(same && real.venta && real.cvt!==null && real.cvt!==undefined){
+    real.mc = (real.venta - real.cvt)/real.venta*100;
+  }
+  return real;
+}
+function ctrlRenderMCCheck(real){
+  const el = document.getElementById('ctrl-mc-check');
+  if(!el) return;
+  const calc = (real.venta && real.cvt!==null && real.cvt!==undefined) ? (real.venta-real.cvt)/real.venta*100 : null;
+  const rep  = real.mc_reportado;
+  if(calc===null && rep===null){ el.innerHTML=''; return; }
+  const partes = [];
+  if(calc!==null) partes.push('Calculado (venta &minus; CVT) &divide; venta: <strong>'+calc.toFixed(1)+'%</strong>');
+  if(rep!==null)  partes.push('Reportado por el Job (col Z): <strong>'+rep.toFixed(1)+'%</strong>');
+  let extra = '';
+  if(calc!==null && rep!==null){
+    const d = calc - rep;
+    const col = Math.abs(d) < 0.5 ? 'var(--teal)' : 'var(--brick)';
+    extra = ' &nbsp;·&nbsp; diferencia <strong style="color:'+col+'">'+(d>=0?'+':'')+d.toFixed(1)+' pp</strong>'
+          + (Math.abs(d) < 0.5 ? ' — cuadran' : ' — no cuadran, revisa que el Job use la misma base');
+  }
+  el.innerHTML = partes.join(' &nbsp;·&nbsp; ') + extra;
+}
 function ctrlRenderComparison(){
   const quoted = ctrlGetQuotedData();
   if(!quoted){ document.getElementById('ctrl-scorecards').innerHTML=''; document.getElementById('ctrl-table').innerHTML=''; return; }
@@ -3138,11 +3181,8 @@ function ctrlRenderComparison(){
     Valor de venta = ${qty(quoted.cantidad_venta)} pza &times; ${money(quoted.precio)} = <strong>${money(quoted.venta)}</strong> (precio comprometido, no del Excel)<br>
     MC% cotizado = (venta &minus; costo variable total) &divide; venta = <strong>${quoted.mc.toFixed(1)}%</strong> &mdash; calculado aqui, no leido del Excel
   </div>`;
-  const real = {};
-  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
-    const v = document.getElementById('ctrl-real-'+f).value;
-    real[f] = v==='' ? null : Number(v);
-  });
+  const real = ctrlGetRealData();
+  ctrlRenderMCCheck(real);
 
   const rows = [
     {label:'Papel/Sustrato', cot:quoted.papel, real:real.papel},
@@ -3154,7 +3194,7 @@ function ctrlRenderComparison(){
     {label:'Overhead', cot:quoted.overhead, real:real.overhead},
     {label:'Costo Variable Total', cot:quoted.cvt, real:real.cvt, bold:true},
     {label:'Valor de Venta', cot:quoted.venta, real:real.venta, bold:true},
-    {label:'MC%', cot:quoted.mc, real:real.mc, isPct:true},
+    {label:'MC% ('+(real.mc_formula||'calculado')+')', cot:quoted.mc, real:real.mc, isPct:true},
     {label:'Cantidad', cot:quoted.cantidad, real:real.qty, isQty:true},
     {label:'Precio de Venta', cot:quoted.precio, real:real.precio},
   ];
@@ -3206,11 +3246,7 @@ function ctrlSave(){
   if(!qid||!tierQty){ showToast('Selecciona cotización y cantidad'); return; }
   const quoted = ctrlGetQuotedData();
   if(!quoted){ showToast('Sin cost breakdown para esa cantidad — sube el Excel con PEDIDO!B31'); return; }
-  const real = {};
-  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
-    const v = document.getElementById('ctrl-real-'+f).value;
-    real[f] = v==='' ? null : Number(v);
-  });
+  const real = ctrlGetRealData();
   if(!DB.controllerHistory) DB.controllerHistory = [];
   DB.controllerHistory.push({
     id: uid('ctrl'), date: new Date().toISOString().slice(0,10),
@@ -3366,12 +3402,12 @@ function ctrlExportHistory(){
   resumen.push(['Jobs por DEBAJO o en costo', list.length-overs]);
 
   /* ---- Hoja 2: Detalle ---- */
-  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza'];
+  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza','MC% real: origen','MC% reportado Job'];
   rubros.forEach(([label])=>headers.push(label+' Cot', label+' Real', label+' Dif $', label+' Dif %'));
   headers.push('MC% Cot','MC% Real','MC% Dif (pp)','Precio/pza Cot','Precio/pza Real','Precio/pza Dif');
   const detalle = [headers];
   list.forEach(h=>{
-    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado)];
+    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado), h.real?.mc_formula||'—', n(h.real?.mc_reportado)];
     rubros.forEach(([label,key])=>{
       row.push(n(h.quoted?.[key]), n(h.real?.[key]), dif(h.real?.[key],h.quoted?.[key]), difp(h.real?.[key],h.quoted?.[key]));
     });
