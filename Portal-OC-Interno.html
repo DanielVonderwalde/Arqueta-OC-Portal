@@ -488,6 +488,19 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
           <tbody id="cd-quotes-body"></tbody>
         </table>
       </div>
+
+      <div class="card crop" style="margin-top:16px;padding:0;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:18px 20px 12px;">
+          <h2 style="margin:0;">Órdenes de compra</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;" id="cd-oc-filters"></div>
+        </div>
+        <div class="small-note" id="cd-oc-summary" style="padding:0 20px 10px;"></div>
+        <table style="padding:6px;">
+          <thead><tr><th>OC</th><th>Productos</th><th>Fecha</th><th style="text-align:right;">Total con IVA</th><th>Factura</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="cd-ocs-body"></tbody>
+        </table>
+      </div>
     </div>
 
     <!-- ===== COTIZACIONES ===== -->
@@ -1796,8 +1809,70 @@ function openClientDetail(id){
       <td style="text-align:right;"><button class="btn btn-ghost" onclick="event.stopPropagation();openQuoteDetail('${q.id}')">Ver →</button></td>
     </tr>`).join('') : `<tr><td colspan="5" class="empty">Este cliente no tiene cotizaciones aún</td></tr>`;
 
+  renderClientOCs();
+
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById('view-client-detail').classList.add('active');
+}
+
+/* ---- Órdenes de compra del cliente, con filtro activas / facturadas ---- */
+let cdOCFiltro = 'activas';   // activas | facturadas | rechazadas | todas
+function setClientOCFilter(f){ cdOCFiltro = f; renderClientOCs(); }
+
+function renderClientOCs(){
+  if(!currentClientId) return;
+  const todas = (DB.clientOCs||[]).filter(o=>o.client_id===currentClientId)
+                  .sort((a,b)=>(b.date_submitted||'').localeCompare(a.date_submitted||''));
+  const esActiva = o => !['facturada','rechazada'].includes(o.status);
+  const conteos = {
+    activas:    todas.filter(esActiva).length,
+    facturadas: todas.filter(o=>o.status==='facturada').length,
+    rechazadas: todas.filter(o=>o.status==='rechazada').length,
+    todas:      todas.length
+  };
+  const pills = [['activas','Activas'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
+  document.getElementById('cd-oc-filters').innerHTML = pills.map(([k,label])=>
+    `<button class="btn ${cdOCFiltro===k?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:5px 12px;" onclick="setClientOCFilter('${k}')">${label} (${conteos[k]})</button>`
+  ).join('');
+
+  const list = cdOCFiltro==='todas' ? todas
+             : cdOCFiltro==='activas' ? todas.filter(esActiva)
+             : todas.filter(o=>o.status===cdOCFiltro.replace(/s$/,''));
+
+  const totalDe = arr => arr.reduce((s,o)=>s+(o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0)*1.16, 0);
+  document.getElementById('cd-oc-summary').innerHTML = list.length
+    ? `${list.length} orden(es) · <strong>${money(totalDe(list))}</strong> con IVA` +
+      (conteos.facturadas ? ` · facturado histórico ${money(totalDe(todas.filter(o=>o.status==='facturada')))}` : '')
+    : '';
+
+  const badgeDe = st => st==='facturada'
+      ? '<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>'
+      : st==='rechazada' ? '<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>'
+      : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Recibida</span>'
+      : '<span class="badge badge-borrador" style="font-size:10px;">Pendiente</span>';
+
+  document.getElementById('cd-ocs-body').innerHTML = list.length ? list.map(o=>{
+    const lines = o.lines || [];
+    const sub = lines.reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0);
+    const prods = lines.length
+      ? lines.slice(0,2).map(l=>`${l.product} <span style="color:var(--muted);">(${qty(l.quantity)})</span>`).join('<br>') +
+        (lines.length>2 ? `<div style="color:var(--muted);font-size:11px;">+${lines.length-2} más</div>` : '')
+      : '—';
+    const urg = o.urgente ? ' <span class="badge badge-match-no" style="font-size:9px;">URGENTE</span>' : '';
+    const facturar = o.status==='recibida'
+      ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada" onclick="marcarFacturada('${o.id}')">$</button>` : '';
+    const file = o.fileName
+      ? `<button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
+    return `<tr>
+      <td class="mono">${o.oc_number}${urg}</td>
+      <td style="font-size:12px;">${prods}</td>
+      <td>${o.date_submitted||'—'}</td>
+      <td style="text-align:right;font-weight:600;">${money(sub*1.16)}</td>
+      <td class="mono" style="font-size:11px;">${o.factura_numero||'—'}</td>
+      <td>${badgeDe(o.status||'pendiente')}</td>
+      <td style="text-align:right;white-space:nowrap;">${facturar}${file}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7" class="empty">Sin órdenes ${cdOCFiltro==='todas'?'':cdOCFiltro} para este cliente</td></tr>`;
 }
 
 /* =========================================================
@@ -2764,6 +2839,7 @@ function marcarFacturada(id){
   oc.factura_fecha = new Date().toISOString().slice(0,10);
   oc.status = 'facturada';
   saveData(); renderPOList(); renderInicio();
+  if(currentClientId) renderClientOCs();
   showToast('OC ' + oc.oc_number + ' facturada y archivada');
 }
 function setClientOCStatus(id, newStatus){
