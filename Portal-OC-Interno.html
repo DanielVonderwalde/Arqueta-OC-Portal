@@ -619,7 +619,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         </div>
         <div class="formrow" style="grid-template-columns:1fr 1fr;gap:12px;">
           <div class="field"><label>Cantidad a comparar (pza)</label><input type="number" id="ctrl-tier" placeholder="Se llena del Job o escríbela" onchange="ctrlTierChanged()"></div>
-          <div class="field"><label>Precio cotizado por pieza</label><input type="number" step="0.01" id="ctrl-quoted-price" placeholder="Automático" readonly style="background:var(--paper-raised);"></div>
+          <div class="field"><label>Precio cotizado por pieza <span style="font-weight:400;color:var(--muted);">— este manda</span></label><input type="number" step="0.0001" id="ctrl-quoted-price" placeholder="Ej: 6.30" onchange="ctrlPriceChanged()" oninput="ctrlPriceChanged()"><div style="font-size:11px;color:var(--muted);margin-top:3px;">El valor de venta = cantidad x este precio. No se toma del Excel.</div></div>
         </div>
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:-4px 0 10px;cursor:pointer;">
           <input type="checkbox" id="ctrl-qty-from-job" checked>
@@ -2752,6 +2752,7 @@ function ctrlQuoteChanged(){
   const q0 = quoteById(qid);
   const hint = document.getElementById('ctrl-dl-hint');
   if(hint) hint.textContent = qid ? (q0 && q0.excelName ? q0.excelName : 'Excel de ' + (q0?.quote_number||'la cotizacion')) : 'Selecciona una cotización.';
+  document.getElementById('ctrl-quoted-price').value = '';
   document.getElementById('ctrl-quote-excel-status').textContent = tiers.length
     ? 'Desglose en base de datos para: ' + tiers.map(t=>qty(t.quantity_tier)).join(' · ') + ' pza'
     : 'Esta cotizacion no tiene desglose de costo guardado. Sube el Excel o cargalo desde Cotizaciones.';
@@ -3011,6 +3012,26 @@ function ctrlModelComponent(tiers, key, targetQty){
   return Math.max(0, a + b*targetQty);
 }
 
+function ctrlPriceChanged(){ ctrlRenderComparison(); }
+function ctrlPrecioCotizado(){
+  const v = Number(document.getElementById('ctrl-quoted-price').value);
+  return (v && !isNaN(v) && v>0) ? v : 0;
+}
+/* Precarga el precio del escalon cotizado, pero solo si el campo esta vacio:
+   una vez que lo escribes tu, manda el tuyo. */
+function ctrlPrefillPrice(force){
+  const el = document.getElementById('ctrl-quoted-price');
+  if(!el) return;
+  if(el.value && !force) return;
+  const tiers = ctrlTiersInUse();
+  if(!tiers.length) return;
+  const inputQty = Number(document.getElementById('ctrl-tier').value);
+  let t = inputQty ? tiers.find(x=>Number(x.quantity_tier)===inputQty) : null;
+  if(!t && inputQty) t = tiers.reduce((b,x)=> Math.abs(x.quantity_tier-inputQty) < Math.abs(b.quantity_tier-inputQty) ? x : b);
+  if(!t) t = tiers[0];
+  const p = t.precio_pieza || pricePerPiece(t);
+  if(p) el.value = Number(p).toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+}
 function ctrlGetQuotedData(){
   const qid = document.getElementById('ctrl-quote').value;
   const inputQty = Number(document.getElementById('ctrl-tier').value);
@@ -3018,15 +3039,35 @@ function ctrlGetQuotedData(){
   if(!qid || !inputQty){ if(warn) warn.style.display='none'; return null; }
   const tiers = ctrlTiersInUse();
   if(!tiers.length){ if(warn) warn.style.display='none'; return null; }
+  if(!ctrlPrecioCotizado()){
+    ctrlPrefillPrice(false);
+    if(!ctrlPrecioCotizado() && warn){
+      warn.innerHTML = '<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">Escribe el <strong>precio cotizado por pieza</strong> (el que quedo comprometido en la OC). De ahi sale el valor de venta.</div>';
+      warn.style.display='';
+      return null;
+    }
+  }
 
-  const build = (o, modo, refQty) => ({
-    cantidad: inputQty, cantidad_cotizada: refQty, es_exacta: modo==='exacta', modo,
-    papel:o.papel, acabado:o.acabado, materiales:o.materiales,
-    insumos:o.papel+o.acabado+o.materiales,
-    mod:o.mod, ee:o.ee, overhead:o.overhead,
-    cvt:o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte,
-    venta:o.venta, mc:o.mc, precio:o.precio
-  });
+  ctrlPrefillPrice(false);
+  const precio  = ctrlPrecioCotizado();
+  // La cantidad que factura es la de PEDIDO!B31 si el Excel la trae; si no, la del Job
+  const qtyVenta = ctrlExcelB31 || inputQty;
+
+  const build = (o, modo, refQty) => {
+    const cvt = o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte;
+    const venta = precio * qtyVenta;                      // ← precio comprometido x cantidad
+    return {
+      cantidad: inputQty, cantidad_venta: qtyVenta, cantidad_cotizada: refQty,
+      es_exacta: modo==='exacta', modo,
+      papel:o.papel, acabado:o.acabado, materiales:o.materiales,
+      insumos:o.papel+o.acabado+o.materiales,
+      mod:o.mod, ee:o.ee, overhead:o.overhead,
+      cvt: cvt,
+      venta: venta,
+      mc: venta ? (venta - cvt)/venta*100 : 0,            // ← MC calculado, no del Excel
+      precio: precio
+    };
+  };
 
   // 1) Coincidencia exacta con un escalon cotizado
   const exact = tiers.find(t=>Number(t.quantity_tier)===inputQty);
@@ -3035,11 +3076,8 @@ function ctrlGetQuotedData(){
     const o = {
       papel:Number(exact.sustrato)||0, acabado:Number(exact.acabado)||0, materiales:Number(exact.materiales)||0,
       mod:Number(exact.mod)||0, ee:Number(exact.ee)||0, overhead:Number(exact.extras)||0,
-      transporte:Number(exact.transporte)||0, venta:Number(exact.valor_venta_total)||0
+      transporte:Number(exact.transporte)||0
     };
-    o.mc = exact.margen ? exact.margen*100 : (o.venta ? ((o.venta-(o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte))/o.venta*100) : 0);
-    o.precio = o.venta && inputQty ? o.venta/inputQty : 0;
-    document.getElementById('ctrl-quoted-price').value = o.precio ? o.precio.toFixed(2) : '';
     return build(o,'exacta',inputQty);
   }
 
@@ -3055,13 +3093,8 @@ function ctrlGetQuotedData(){
       mod: ctrlModelComponent(tiers,'mod',inputQty),
       ee: ctrlModelComponent(tiers,'ee',inputQty),
       overhead: ctrlModelComponent(tiers,'extras',inputQty),
-      transporte: ctrlModelComponent(tiers,'transporte',inputQty),
-      venta: ctrlModelComponent(tiers,'valor_venta_total',inputQty)
+      transporte: ctrlModelComponent(tiers,'transporte',inputQty)
     };
-    const cvt = o.papel+o.acabado+o.materiales+o.mod+o.ee+o.overhead+o.transporte;
-    o.mc = o.venta ? (o.venta-cvt)/o.venta*100 : 0;
-    o.precio = o.venta && inputQty ? o.venta/inputQty : 0;
-    document.getElementById('ctrl-quoted-price').value = o.precio ? o.precio.toFixed(2) : '';
     if(warn){
       warn.innerHTML = '<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">'
         + (dentro ? 'Cantidad <strong>'+qty(inputQty)+'</strong> INTERPOLADA' : 'Cantidad <strong>'+qty(inputQty)+'</strong> EXTRAPOLADA (fuera del rango cotizado '+qty(Math.min(...qs))+'–'+qty(Math.max(...qs))+')')
@@ -3088,11 +3121,8 @@ function ctrlGetQuotedData(){
   const o = {
     papel:Number(t.sustrato)||0, acabado:Number(t.acabado)||0, materiales:Number(t.materiales)||0,
     mod:Number(t.mod)||0, ee:Number(t.ee)||0, overhead:Number(t.extras)||0,
-    transporte:Number(t.transporte)||0, venta:Number(t.valor_venta_total)||0
+    transporte:Number(t.transporte)||0
   };
-  o.mc = t.margen ? t.margen*100 : 0;
-  o.precio = pricePerPiece(t);
-  document.getElementById('ctrl-quoted-price').value = o.precio ? o.precio.toFixed(2) : '';
   if(warn){
     warn.innerHTML = '<div style="background:var(--kraft-soft);border:1px solid var(--kraft);border-radius:6px;padding:10px 14px;margin-top:8px;font-size:12.5px;">Solo hay un escalon cotizado ('+qty(t.quantity_tier)+' pza). Se usa tal cual — carga mas escalones para poder interpolar.</div>';
     warn.style.display='';
@@ -3103,7 +3133,11 @@ function ctrlRenderComparison(){
   const quoted = ctrlGetQuotedData();
   if(!quoted){ document.getElementById('ctrl-scorecards').innerHTML=''; document.getElementById('ctrl-table').innerHTML=''; return; }
   const MODO_LBL = {exacta:'Escalón cotizado exacto', interpolada:'Interpolado (fijo + variable)', extrapolada:'Extrapolado (fuera del rango cotizado)', aproximada:'Escalón más cercano'};
-  const matchNote = `<div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);">Base del cotizado para ${qty(quoted.cantidad)} pza: <strong>${MODO_LBL[quoted.modo]||quoted.modo}</strong></div>`;
+  const matchNote = `<div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted);line-height:1.6;">
+    Costos cotizados para ${qty(quoted.cantidad)} pza: <strong>${MODO_LBL[quoted.modo]||quoted.modo}</strong><br>
+    Valor de venta = ${qty(quoted.cantidad_venta)} pza &times; ${money(quoted.precio)} = <strong>${money(quoted.venta)}</strong> (precio comprometido, no del Excel)<br>
+    MC% cotizado = (venta &minus; costo variable total) &divide; venta = <strong>${quoted.mc.toFixed(1)}%</strong> &mdash; calculado aqui, no leido del Excel
+  </div>`;
   const real = {};
   ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
     const v = document.getElementById('ctrl-real-'+f).value;
@@ -3183,6 +3217,7 @@ function ctrlSave(){
     client_name: cl?.name||'', quote_number: q?.quote_number||'', product_name: q?.product_name||'',
     quote_id: qid, tier_qty: tierQty, modo: quoted?.modo || '',
     fuente: ctrlExcelOrigen || 'base de datos', pedido_b31: ctrlExcelB31 || null,
+    precio_cotizado: ctrlPrecioCotizado(),
     quoted: quoted, real: real
   });
   saveData(); showToast('Comparación guardada'); ctrlRenderHistory();
@@ -3331,12 +3366,12 @@ function ctrlExportHistory(){
   resumen.push(['Jobs por DEBAJO o en costo', list.length-overs]);
 
   /* ---- Hoja 2: Detalle ---- */
-  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31'];
+  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza'];
   rubros.forEach(([label])=>headers.push(label+' Cot', label+' Real', label+' Dif $', label+' Dif %'));
   headers.push('MC% Cot','MC% Real','MC% Dif (pp)','Precio/pza Cot','Precio/pza Real','Precio/pza Dif');
   const detalle = [headers];
   list.forEach(h=>{
-    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31)];
+    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado)];
     rubros.forEach(([label,key])=>{
       row.push(n(h.quoted?.[key]), n(h.real?.[key]), dif(h.real?.[key],h.quoted?.[key]), difp(h.real?.[key],h.quoted?.[key]));
     });
