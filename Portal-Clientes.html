@@ -174,7 +174,6 @@ if(EMAILJS_PUBLIC_KEY) emailjs.init(EMAILJS_PUBLIC_KEY);
 </script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 firebase.initializeApp({
   apiKey: "AIzaSyBH2ykaKrIFOQorRBXHIocrau5JFe-BxMk",
@@ -193,28 +192,21 @@ let DB = {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:
 let currentClient = null;
 
 /* ANTES: el portal del cliente hacia fbRef.set(DB) — reescribia TODA la base
-   cada vez que alguien mandaba una OC. Dos clientes al mismo tiempo, o un
-   cliente mientras el admin editaba, y se perdia trabajo. Ademas obligaba a
-   dejar permiso de escritura sobre todo el arbol.
-   AHORA: solo se escribe la OC nueva en su propia llave.                   */
+   cada vez que alguien enviaba una OC. Dos clientes a la vez, o un cliente
+   mientras el admin editaba, y se perdia trabajo.
+   AHORA: solo se escribe la OC nueva, en su propia llave. El cliente ya no
+   puede tocar cotizaciones, clientes ni ordenes ajenas.                    */
 async function guardarMiOC(oc){
   if(!oc || !oc.id) return;
-  try{
-    if(oc.fileData && oc.fileData.length>100 && oc.fileData!=='[cloud]'){
-      await fbFilesRef.child('oc_'+oc.id).set({name:oc.fileName, data:oc.fileData});
-    }
-    const lite = JSON.parse(JSON.stringify(oc));
-    if(lite.fileData && lite.fileData.length>100) lite.fileData='[cloud]';
-    await fbRef.child('clientOCs').child(oc.id).set(lite);
-  }catch(e){
-    console.error('Error al guardar la OC:', e);
-    showToast('No se pudo enviar la orden: ' + e.message);
-    throw e;
+  if(oc.fileData && oc.fileData.length>100 && oc.fileData!=='[cloud]'){
+    await fbFilesRef.child('oc_'+oc.id).set({name:oc.fileName, data:oc.fileData});
   }
+  const lite = JSON.parse(JSON.stringify(oc));
+  if(lite.fileData && lite.fileData.length>100) lite.fileData='[cloud]';
+  await fbRef.child('clientOCs').child(oc.id).set(lite);
 }
 
-/* Se conserva el nombre por compatibilidad, pero ya no reescribe nada global */
-function saveData(){ console.warn('saveData() ya no escribe la base completa desde el portal del cliente'); }
+function saveData(){ console.warn('El portal del cliente ya no reescribe la base completa'); }
 async function mergePortalFiles(db){
   try{
     const snap = await fbFilesRef.once('value');
@@ -261,48 +253,28 @@ function showToast(msg){
 }
 
 let firebaseLoaded = false;
-async function handleLogin(){
+function handleLogin(){
+  if(!firebaseLoaded){
+    document.getElementById('login-error').textContent = 'Cargando datos, espera un momento...';
+    document.getElementById('login-error').style.display='block';
+    return;
+  }
   const email = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
-  const err = document.getElementById('login-error');
-  err.style.display='none';
-  if(!email || !pass){ err.textContent='Escribe tu correo y contraseña'; err.style.display='block'; return; }
-  try{
-    // La contraseña la valida Firebase Auth, ya no viaja dentro de la base
-    await firebase.auth().signInWithEmailAndPassword(email, pass);
-    await abrirPortalDeUsuario(firebase.auth().currentUser);
-  }catch(e){
-    err.textContent = 'Correo o contraseña incorrectos, o tu acceso está inactivo.';
-    err.style.display='block';
-  }
-}
-
-async function abrirPortalDeUsuario(user){
-  if(!user) return;
-  const err = document.getElementById('login-error');
-  try{
-    if(!firebaseLoaded) await new Promise(r=>{ const t=setInterval(()=>{ if(firebaseLoaded){clearInterval(t);r();} },120); });
-    const email = (user.email||'').toLowerCase();
-    const client = DB.clients.find(c => c.portal_active && c.portal_email && c.portal_email.toLowerCase()===email);
-    if(!client){
-      await firebase.auth().signOut();
-      err.textContent = 'Tu acceso no está activo. Comunícate con Arqueta.';
-      err.style.display='block';
-      return;
-    }
+  console.log('Login attempt:', email, '| Clients in DB:', DB.clients.length);
+  console.log('Active clients:', DB.clients.filter(c=>c.portal_active).map(c=>c.portal_email));
+  const client = DB.clients.find(c => c.portal_active && c.portal_email && c.portal_email.toLowerCase()===email && c.portal_password===pass);
+  if(client){
+    sessionStorage.setItem('arqueta_portal_client', client.id);
     currentClient = client;
     showPortal(client);
-  }catch(e){
-    err.textContent = 'Error al abrir el portal: ' + e.message;
-    err.style.display='block';
+  } else {
+    document.getElementById('login-error').textContent = 'Correo o contraseña incorrectos, o tu acceso está inactivo.';
+    document.getElementById('login-error').style.display='block';
   }
 }
-
-firebase.auth().onAuthStateChanged(user=>{ if(user && !currentClient) abrirPortalDeUsuario(user); });
-
 function handleLogout(){
   sessionStorage.removeItem('arqueta_portal_client');
-  firebase.auth().signOut(); currentClient = null;
   currentClient = null;
   document.getElementById('portal').classList.remove('active');
   document.getElementById('login-screen').style.display='flex';
@@ -409,8 +381,13 @@ function submitOC(){
       status: 'pendiente'
     };
     DB.clientOCs.push(nuevaOC);
-    try{ await guardarMiOC(nuevaOC); }
-    catch(_){ DB.clientOCs = DB.clientOCs.filter(o=>o.id!==nuevaOC.id); return; }
+    try{
+      await guardarMiOC(nuevaOC);
+    }catch(e){
+      DB.clientOCs = DB.clientOCs.filter(o=>o.id!==nuevaOC.id);
+      showToast('No se pudo enviar la orden: ' + e.message);
+      return;
+    }
     document.getElementById('oc-number').value='';
     document.getElementById('oc-notes').value='';
     document.getElementById('oc-fecha-deseada').value='';
@@ -781,9 +758,11 @@ window.addEventListener('DOMContentLoaded', async ()=>{
     }
   }catch(e){ console.error('Firebase load error:',e); firebaseLoaded = true; }
 
-  // La sesión ya la maneja Firebase Auth (onAuthStateChanged)
-  const u = firebase.auth().currentUser;
-  if(u && !currentClient) abrirPortalDeUsuario(u);
+  const savedId = sessionStorage.getItem('arqueta_portal_client');
+  if(savedId){
+    const client = DB.clients.find(c=>c.id===savedId && c.portal_active);
+    if(client){ currentClient=client; showPortal(client); }
+  }
 
   // Real-time listener — see status changes instantly
   fbRef.on('value', snap=>{
