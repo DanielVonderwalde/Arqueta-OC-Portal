@@ -3822,31 +3822,35 @@ function ctrlScorecard(r, opts){
   const tieneReal = r.real!==null && r.real!==undefined;
   const diff = (tieneReal && r.cot) ? r.real - r.cot : null;
   const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
+  // En MC% subir es bueno; en costos subir es malo
   const color = diff===null ? 'var(--muted)'
               : (r.isPct ? (diff>=0?'var(--teal)':'var(--brick)') : (diff<=0?'var(--teal)':'var(--brick)'));
-  const fmt = v => v===null||v===undefined ? '—' : (r.isPct ? Number(v).toFixed(1)+'%' : (r.isQty ? qty(v) : money(v)));
-  const vs = opts.big ? '17px' : '15px';
+  const fmt = v => (v===null||v===undefined) ? '—'
+              : (r.isPct ? Number(v).toFixed(1)+'%' : (r.isQty ? qty(v) : money(v)));
+  const vs = opts.big ? '16px' : '14.5px';
 
-  const celda = (etiqueta, valor, alDerecha) => `
-    <div style="min-width:0;${alDerecha?'border-left:1px solid var(--line);padding-left:12px;':'padding-right:12px;'}">
-      <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:3px;">${etiqueta}</div>
-      <div class="mono" style="font-size:${vs};font-weight:700;line-height:1.25;overflow-wrap:anywhere;">${valor}</div>
+  /* Una fila por lado: etiqueta a la izquierda, monto alineado a la derecha.
+     Asi nunca se encima aunque el numero sea largo. */
+  const fila = (etiqueta, valor, color2, punto, extra) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:6px 0;${extra||''}">
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);white-space:nowrap;">
+        <span style="width:7px;height:7px;border-radius:2px;background:${punto};flex:none;"></span>${etiqueta}
+      </span>
+      <span class="mono" style="font-size:${vs};font-weight:700;line-height:1.3;text-align:right;${color2?'color:'+color2+';':''}">${valor}</span>
     </div>`;
 
   const pie = diff===null ? '' : `
-    <div style="margin-top:10px;padding-top:7px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
-      <span style="font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Diferencia</span>
-      <span class="mono" style="font-size:13.5px;font-weight:700;color:${color};">
-        ${diff>=0?'+':''}${r.isPct ? diff.toFixed(1)+'pp' : money(diff)}${(!r.isPct && diffPct!==null) ? ` <span style="font-size:11px;opacity:.75;">(${diffPct>=0?'+':''}${diffPct.toFixed(1)}%)</span>` : ''}
+    <div style="margin-top:6px;padding-top:7px;border-top:1px dashed var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+      <span style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);">Diferencia</span>
+      <span class="mono" style="font-size:13.5px;font-weight:700;color:${color};text-align:right;">
+        ${diff>=0?'+':''}${r.isPct ? diff.toFixed(1)+' pp' : money(diff)}${(!r.isPct && diffPct!==null) ? `<br><span style="font-size:11px;opacity:.8;font-weight:600;">${diffPct>=0?'+':''}${diffPct.toFixed(1)}%</span>` : ''}
       </span>
     </div>`;
 
-  return `<div style="background:var(--paper-raised);border:1px solid var(--line);border-left:3px solid ${color};border-radius:6px;padding:13px 14px;min-width:0;">
-    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:9px;font-weight:600;">${r.label}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;align-items:start;">
-      ${celda('Cotizado', fmt(r.cot), false)}
-      ${celda('Real', tieneReal ? fmt(r.real) : '—', true)}
-    </div>
+  return `<div style="background:var(--paper-raised);border:1px solid var(--line);border-left:3px solid ${color};border-radius:6px;padding:12px 14px;min-width:0;">
+    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px;font-weight:700;">${r.label}</div>
+    ${fila('Cotizado', fmt(r.cot), null, 'var(--kraft)', 'border-bottom:1px solid var(--line);')}
+    ${fila('Real', tieneReal ? fmt(r.real) : '—', tieneReal ? color : 'var(--muted)', tieneReal ? color : 'var(--line)')}
     ${pie}
   </div>`;
 }
@@ -4012,7 +4016,7 @@ function ctrlShowDetail(id){
       </div>
     </div>
     ${meta?`<div style="font-size:11.5px;color:var(--muted);margin:-8px 0 18px;">${meta}</div>`:''}
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:12px;margin-bottom:22px;">${scorecards}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;margin-bottom:22px;">${scorecards}</div>
     ${ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado. El % de la derecha es la desviación.', ctrlChartBars(h.quoted, h.real))}
     ${ctrlChartCard('Qué movió la desviación','Peso en pesos de cada rubro. A la izquierda lo que ahorraste, a la derecha lo que se te fue.', ctrlChartDeviation(h.quoted, h.real))}
     ${ctrlChartCard('Composición del costo','En qué se va cada peso del costo variable, cotizado contra real.', ctrlChartComposition(h.quoted, h.real))}
