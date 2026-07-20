@@ -807,6 +807,19 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 
       <div class="small-note" id="files-summary" style="margin-bottom:12px;"></div>
       <div id="files-tree"></div>
+
+      <div class="card crop admin-only" style="margin-top:22px;">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;">
+          <div><h2 style="margin:0;">Respaldos</h2>
+            <div style="font-size:11.5px;color:var(--muted);margin-top:2px;">Se crea uno automático el primer acceso de cada día. Se conservan los últimos 14.</div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-secondary" style="font-size:12px;" onclick="descargarAhora()">⬇ Estado actual</button>
+            <button class="btn btn-primary" style="font-size:12px;" onclick="crearRespaldo()">Crear respaldo ahora</button>
+          </div>
+        </div>
+        <div id="backup-list" style="margin-top:10px;"></div>
+      </div>
     </div>
 
     <!-- ===== PORTAL CLIENTES ===== -->
@@ -978,6 +991,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 firebase.initializeApp({
   apiKey: "AIzaSyBH2ykaKrIFOQorRBXHIocrau5JFe-BxMk",
@@ -1035,6 +1049,9 @@ function seedData(){
 }
 
 const fbFilesRef = firebase.database().ref('arqueta_files');
+const fbBackupsRef = firebase.database().ref('arqueta_backups');
+const fbRolesRef = firebase.database().ref('roles');
+let currentUid = null;
 
 function saveData(){
   // Save files to Firebase in a SEPARATE path (one file per key, not all at once)
@@ -1198,25 +1215,146 @@ function statusBadge(status){
   return `<span class="badge badge-${status}">${map[status]||status}</span>`;
 }
 
+
+/* =========================================================
+   RESPALDOS
+   Snapshot diario en arqueta_backups/snapshots/{fecha}. Se guarda como texto
+   JSON para que Firebase no convierta los arreglos en objetos. Conserva 14.
+   ========================================================= */
+async function autoRespaldo(){
+  if(currentRole!=='admin') return;
+  try{
+    const hoy = new Date().toISOString().slice(0,10);
+    const last = (await fbBackupsRef.child('meta/ultimo').once('value')).val();
+    if(last === hoy) return;
+    await crearRespaldo(hoy, true);
+  }catch(e){ console.warn('Respaldo automático falló:', e.message); }
+}
+
+async function crearRespaldo(fecha, silencioso){
+  const key = fecha || new Date().toISOString().slice(0,10);
+  const snap = await fbRef.once('value');
+  const datos = snap.val();
+  if(!datos){ if(!silencioso) showToast('No hay datos que respaldar'); return; }
+  const texto = JSON.stringify(datos);
+  await fbBackupsRef.child('snapshots').child(key).set({
+    fecha: new Date().toISOString(),
+    por: (firebase.auth().currentUser||{}).email || '—',
+    bytes: texto.length,
+    data: texto
+  });
+  await fbBackupsRef.child('meta/ultimo').set(key);
+  // Conservar solo los ultimos 14 dias
+  const todos = (await fbBackupsRef.child('snapshots').once('value')).val() || {};
+  const keys = Object.keys(todos).sort();
+  while(keys.length > 14){
+    await fbBackupsRef.child('snapshots').child(keys.shift()).remove();
+  }
+  if(!silencioso) showToast('Respaldo creado (' + Math.round(texto.length/1024) + ' KB)');
+  renderRespaldos();
+}
+
+async function renderRespaldos(){
+  const host = document.getElementById('backup-list');
+  if(!host) return;
+  if(currentRole!=='admin'){ host.innerHTML = '<div class="small-note">Solo el administrador puede ver los respaldos.</div>'; return; }
+  try{
+    const todos = (await fbBackupsRef.child('snapshots').once('value')).val() || {};
+    const keys = Object.keys(todos).sort().reverse();
+    if(!keys.length){ host.innerHTML = '<div class="small-note">Todavía no hay respaldos. Crea el primero con el botón de arriba.</div>'; return; }
+    host.innerHTML = '<table><thead><tr><th>Fecha</th><th>Creado por</th><th style="text-align:right;">Tamaño</th><th></th></tr></thead><tbody>'
+      + keys.map(k=>{
+          const b = todos[k];
+          return `<tr><td class="mono">${k}</td><td style="font-size:12px;color:var(--muted);">${b.por||'—'}</td>
+            <td style="text-align:right;" class="mono">${Math.round((b.bytes||0)/1024)} KB</td>
+            <td style="text-align:right;"><button class="btn btn-ghost" style="font-size:11px;" onclick="descargarRespaldo('${k}')">⬇ Descargar</button></td></tr>`;
+        }).join('')
+      + '</tbody></table>';
+  }catch(e){ host.innerHTML = '<div class="small-note">No se pudieron leer los respaldos: '+e.message+'</div>'; }
+}
+
+async function descargarRespaldo(key){
+  try{
+    const b = (await fbBackupsRef.child('snapshots').child(key).once('value')).val();
+    if(!b || !b.data){ showToast('Ese respaldo ya no está'); return; }
+    const blob = new Blob([b.data], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'arqueta_respaldo_' + key + '.json';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(_){} }, 60000);
+    showToast('Respaldo descargado');
+  }catch(e){ showToast('Error: '+e.message); }
+}
+
+/* Descarga el estado actual, sin pasar por la nube */
+async function descargarAhora(){
+  const snap = await fbRef.once('value');
+  const blob = new Blob([JSON.stringify(snap.val(), null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'arqueta_estado_' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(_){} }, 60000);
+  showToast('Estado actual descargado');
+}
+
 /* =========================================================
    AUTH
    ========================================================= */
-function handleLogin(){
+async function handleLogin(){
   const u = document.getElementById('login-user').value.trim();
   const p = document.getElementById('login-pass').value;
-  const found = USERS.find(x=>x.user===u && x.pass===p);
-  if(found){
-    currentRole = found.role;
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app').classList.add('active');
-    sessionStorage.setItem('arqueta_admin_session', found.role);
-    document.querySelector('.sidebar-footer .who').textContent = '👤 ' + found.label;
-    renderAll();
-    applyRoleVisibility();
-  } else {
-    document.getElementById('login-error').style.display='block';
+  const err = document.getElementById('login-error');
+  err.style.display='none';
+  if(!u || !p){ err.textContent='Escribe correo y contraseña'; err.style.display='block'; return; }
+  try{
+    const cred = await firebase.auth().signInWithEmailAndPassword(u, p);
+    await entrarComoUsuario(cred.user);
+  }catch(e){
+    err.textContent = e.code==='auth/invalid-credential' || e.code==='auth/wrong-password' || e.code==='auth/user-not-found'
+      ? 'Correo o contraseña incorrectos'
+      : 'No se pudo iniciar sesión: ' + (e.message||e.code);
+    err.style.display='block';
   }
 }
+
+/* El rol NO vive en el navegador: se lee de /roles/{uid}, que solo el admin puede escribir */
+async function entrarComoUsuario(user){
+  const err = document.getElementById('login-error');
+  try{
+    const snap = await fbRolesRef.child(user.uid).once('value');
+    const info = snap.val();
+    if(!info || !info.role){
+      await firebase.auth().signOut();
+      err.textContent = 'Tu usuario no tiene rol asignado. Pídele al administrador que te dé de alta en /roles.';
+      err.style.display='block';
+      return;
+    }
+    if(info.role!=='admin' && info.role!=='asociado'){
+      await firebase.auth().signOut();
+      err.textContent = 'Este portal es solo para personal de Arqueta.';
+      err.style.display='block';
+      return;
+    }
+    currentUid = user.uid;
+    currentRole = info.role;
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('app').classList.add('active');
+    document.querySelector('.sidebar-footer .who').textContent = '👤 ' + (info.label || user.email);
+    renderAll();
+    applyRoleVisibility();
+    autoRespaldo();
+  }catch(e){
+    err.textContent = 'Error al leer permisos: ' + e.message;
+    err.style.display='block';
+  }
+}
+
+/* Sesión persistente entre recargas, la maneja Firebase */
+firebase.auth().onAuthStateChanged(user=>{
+  if(user && !currentUid) entrarComoUsuario(user);
+});
 function applyRoleVisibility(){
   document.querySelectorAll('.admin-only').forEach(el=>{
     el.style.display = currentRole==='admin' ? '' : 'none';
@@ -1232,6 +1370,8 @@ function applyRoleVisibility(){
   });
 }
 function handleLogout(){
+  currentUid = null; currentRole = 'admin';
+  firebase.auth().signOut();
   sessionStorage.removeItem('arqueta_admin_session');
   document.getElementById('app').classList.remove('active');
   document.getElementById('login-screen').style.display='flex';
@@ -1242,15 +1382,6 @@ document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key=
 window.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{weekday:'long', year:'numeric', month:'long', day:'numeric'});
   await initFirebase();
-  if(sessionStorage.getItem('arqueta_admin_session')){
-    currentRole = sessionStorage.getItem('arqueta_admin_session');
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app').classList.add('active');
-    const found = USERS.find(x=>x.role===currentRole);
-    if(found) document.querySelector('.sidebar-footer .who').textContent = '👤 ' + found.label;
-    renderAll();
-    applyRoleVisibility();
-  }
 });
 
 function setExportPeriod(days){
@@ -1332,7 +1463,7 @@ function goTo(view){
   if(view==='portal') renderPortal();
 }
 function renderAll(){
-  renderInicio(); renderClientsList(); renderQuotesList(); renderPOList(); renderArchivos();
+  renderInicio(); renderClientsList(); renderQuotesList(); renderPOList(); renderArchivos(); renderRespaldos();
   renderPortal();
   if(currentRole==='admin'){ renderComparar(); }
 }
