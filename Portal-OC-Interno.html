@@ -273,7 +273,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
-      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.07.19-c</div>
+      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.07.20-d</div>
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
     </div>
@@ -3547,21 +3547,10 @@ function ctrlRenderComparison(){
 
   // Scorecards
   const keyRows = rows.filter(r=>r.bold || r.isPct);
-  document.getElementById('ctrl-scorecards').innerHTML = matchNote + `<div class="grid" style="grid-template-columns:repeat(${keyRows.length},1fr);gap:12px;margin-bottom:20px;">
-    ${keyRows.map(r=>{
-      const diff = (r.real!==null && r.cot) ? r.real - r.cot : null;
-      const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
-      const color = diff===null ? 'var(--muted)' : (r.isPct ? (diff>=0?'var(--teal)':'var(--brick)') : (diff<=0?'var(--teal)':'var(--brick)'));
-      return `<div class="stat-card" style="border-left:3px solid ${color};">
-        <div class="lbl">${r.label}</div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:6px;">
-          <div><div style="font-size:10px;color:var(--muted);">Cotizado</div><div class="mono" style="font-size:14px;font-weight:600;">${r.isPct?r.cot.toFixed(1)+'%':money(r.cot)}</div></div>
-          <div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">Real</div><div class="mono" style="font-size:14px;font-weight:600;">${r.real!==null?(r.isPct?r.real.toFixed(1)+'%':money(r.real)):'—'}</div></div>
-        </div>
-        ${diff!==null?`<div style="text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:13px;font-weight:700;color:${color};">${diff>=0?'+':''}${r.isPct?diff.toFixed(1)+'pp':(diffPct!==null?diffPct.toFixed(1)+'%':'')}</div>`:''}
-      </div>`;
-    }).join('')}
-  </div>`;
+  document.getElementById('ctrl-scorecards').innerHTML = matchNote +
+    `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;margin-bottom:20px;">
+      ${keyRows.map(r=>ctrlScorecard(r)).join('')}
+    </div>`;
 
   // Graficas + tabla de detalle
   const charts = ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado.', ctrlChartBars(quoted, real))
@@ -3826,6 +3815,42 @@ async function filesDownloadZip(){
   if(btn) btn.textContent = '⬇ Descargar ZIP';
 }
 
+/* Tarjeta comparativa: dos columnas separadas por una linea, para que
+   Cotizado y Real nunca se peguen aunque los montos sean largos. */
+function ctrlScorecard(r, opts){
+  opts = opts || {};
+  const tieneReal = r.real!==null && r.real!==undefined;
+  const diff = (tieneReal && r.cot) ? r.real - r.cot : null;
+  const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
+  const color = diff===null ? 'var(--muted)'
+              : (r.isPct ? (diff>=0?'var(--teal)':'var(--brick)') : (diff<=0?'var(--teal)':'var(--brick)'));
+  const fmt = v => v===null||v===undefined ? '—' : (r.isPct ? Number(v).toFixed(1)+'%' : (r.isQty ? qty(v) : money(v)));
+  const vs = opts.big ? '17px' : '15px';
+
+  const celda = (etiqueta, valor, alDerecha) => `
+    <div style="min-width:0;${alDerecha?'border-left:1px solid var(--line);padding-left:12px;':'padding-right:12px;'}">
+      <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:3px;">${etiqueta}</div>
+      <div class="mono" style="font-size:${vs};font-weight:700;line-height:1.25;overflow-wrap:anywhere;">${valor}</div>
+    </div>`;
+
+  const pie = diff===null ? '' : `
+    <div style="margin-top:10px;padding-top:7px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+      <span style="font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);">Diferencia</span>
+      <span class="mono" style="font-size:13.5px;font-weight:700;color:${color};">
+        ${diff>=0?'+':''}${r.isPct ? diff.toFixed(1)+'pp' : money(diff)}${(!r.isPct && diffPct!==null) ? ` <span style="font-size:11px;opacity:.75;">(${diffPct>=0?'+':''}${diffPct.toFixed(1)}%)</span>` : ''}
+      </span>
+    </div>`;
+
+  return `<div style="background:var(--paper-raised);border:1px solid var(--line);border-left:3px solid ${color};border-radius:6px;padding:13px 14px;min-width:0;">
+    <div style="font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:9px;font-weight:600;">${r.label}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;align-items:start;">
+      ${celda('Cotizado', fmt(r.cot), false)}
+      ${celda('Real', tieneReal ? fmt(r.real) : '—', true)}
+    </div>
+    ${pie}
+  </div>`;
+}
+
 function ctrlNueva(){
   ['ctrl-client','ctrl-quote'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
   document.getElementById('ctrl-quote').innerHTML = '<option value="">Selecciona cotización...</option>';
@@ -3962,16 +3987,7 @@ function ctrlShowDetail(id){
     {label:'MC%', cot:h.quoted?.mc, real:h.real?.mc, isPct:true},
   ];
   const keyRows = rows.filter(r=>r.bold||r.isPct);
-  const scorecards = keyRows.map(r=>{
-    const diff = (r.real!==null&&r.real!==undefined&&r.cot) ? r.real-r.cot : null;
-    const color = diff===null?'var(--muted)':r.isPct?(diff>=0?'var(--teal)':'var(--brick)'):(diff<=0?'var(--teal)':'var(--brick)');
-    return `<div style="background:var(--paper-raised);border-left:3px solid ${color};border-radius:6px;padding:14px;">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px;">${r.label}</div>
-      <div style="display:flex;justify-content:space-between;"><div><div style="font-size:10px;color:var(--muted);">Cotizado</div><div class="mono" style="font-size:16px;font-weight:700;">${r.isPct?r.cot?.toFixed(1)+'%':money(r.cot)}</div></div>
-      <div style="text-align:right;"><div style="font-size:10px;color:var(--muted);">Real</div><div class="mono" style="font-size:16px;font-weight:700;">${r.real!==null&&r.real!==undefined?(r.isPct?r.real.toFixed(1)+'%':money(r.real)):'—'}</div></div></div>
-      ${diff!==null?`<div style="text-align:center;margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:14px;font-weight:700;color:${color};">${diff>=0?'+':''}${r.isPct?diff.toFixed(1)+'pp':money(diff)}</div>`:''}
-    </div>`;
-  }).join('');
+  const scorecards = keyRows.map(r=>ctrlScorecard(r, {big:true})).join('');
   const cvtDif = (h.real?.cvt!==null && h.real?.cvt!==undefined && h.quoted?.cvt) ? (h.real.cvt-h.quoted.cvt) : null;
   const cvtPct = (cvtDif!==null && h.quoted?.cvt) ? cvtDif/h.quoted.cvt*100 : null;
   const hcol = cvtPct===null ? 'var(--muted)' : (cvtPct<=0 ? 'var(--teal)' : 'var(--brick)');
@@ -3996,7 +4012,7 @@ function ctrlShowDetail(id){
       </div>
     </div>
     ${meta?`<div style="font-size:11.5px;color:var(--muted);margin:-8px 0 18px;">${meta}</div>`:''}
-    <div style="display:grid;grid-template-columns:repeat(${keyRows.length},1fr);gap:12px;margin-bottom:20px;">${scorecards}</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:12px;margin-bottom:22px;">${scorecards}</div>
     ${ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado. El % de la derecha es la desviación.', ctrlChartBars(h.quoted, h.real))}
     ${ctrlChartCard('Qué movió la desviación','Peso en pesos de cada rubro. A la izquierda lo que ahorraste, a la derecha lo que se te fue.', ctrlChartDeviation(h.quoted, h.real))}
     ${ctrlChartCard('Composición del costo','En qué se va cada peso del costo variable, cotizado contra real.', ctrlChartComposition(h.quoted, h.real))}
