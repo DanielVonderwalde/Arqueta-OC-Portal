@@ -1186,6 +1186,24 @@ function moneyShort(n){
   return '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:0});
 }
 function qty(n){ return Number(n).toLocaleString('es-MX'); }
+
+/* ---------- Fechas en horario de Ciudad de México ----------
+   toISOString() devuelve UTC. Después de las 18:00 hora del centro, UTC ya
+   está en el día siguiente, así que las OCs y respaldos se guardaban con la
+   fecha de mañana. Todo pasa por aquí para usar America/Mexico_City.       */
+const TZ_MX = 'America/Mexico_City';
+function hoyMX(d){
+  // en-CA da formato YYYY-MM-DD
+  return new Intl.DateTimeFormat('en-CA', {timeZone: TZ_MX, year:'numeric', month:'2-digit', day:'2-digit'})
+    .format(d ? new Date(d) : new Date());
+}
+function haceDiasMX(dias){
+  return hoyMX(Date.now() - dias*86400000);
+}
+function ahoraMX(){
+  return new Intl.DateTimeFormat('es-MX', {timeZone: TZ_MX, dateStyle:'medium', timeStyle:'short'}).format(new Date());
+}
+
 function uid(prefix){ return prefix + '-' + Math.random().toString(36).slice(2,9); }
 function totalInsumos(row){ return (row.sustrato||0)+(row.acabado||0)+(row.materiales||0); }
 function costoVariableTotal(row){ return totalInsumos(row)+(row.mod||0)+(row.ee||0)+(row.extras||0)+(row.transporte||0); }
@@ -1219,7 +1237,7 @@ function statusBadge(status){
 async function autoRespaldo(){
   if(currentRole!=='admin') return;
   try{
-    const hoy = new Date().toISOString().slice(0,10);
+    const hoy = hoyMX();
     const last = (await fbBackupsRef.child('meta/ultimo').once('value')).val();
     if(last === hoy) return;
     await crearRespaldo(hoy, true);
@@ -1227,12 +1245,12 @@ async function autoRespaldo(){
 }
 
 async function crearRespaldo(fecha, silencioso){
-  const key = (typeof fecha === 'string' && fecha) ? fecha : new Date().toISOString().slice(0,10);
+  const key = (typeof fecha === 'string' && fecha) ? fecha : hoyMX();
   const datos = (await fbRef.once('value')).val();
   if(!datos){ if(!silencioso) showToast('No hay datos que respaldar'); return; }
   const texto = JSON.stringify(datos);
   await fbBackupsRef.child('snapshots').child(key).set({
-    fecha: new Date().toISOString(), bytes: texto.length, data: texto
+    fecha: ahoraMX(), bytes: texto.length, data: texto
   });
   await fbBackupsRef.child('meta/ultimo').set(key);
   const todos = (await fbBackupsRef.child('snapshots').once('value')).val() || {};
@@ -1276,7 +1294,7 @@ async function descargarRespaldo(key){
 
 async function descargarAhora(){
   const datos = (await fbRef.once('value')).val();
-  _bajarJSON(JSON.stringify(datos, null, 2), 'arqueta_estado_' + new Date().toISOString().slice(0,10) + '.json');
+  _bajarJSON(JSON.stringify(datos, null, 2), 'arqueta_estado_' + hoyMX() + '.json');
   showToast('Estado actual descargado');
 }
 
@@ -1323,7 +1341,7 @@ function handleLogout(){
 }
 document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
 window.addEventListener('DOMContentLoaded', async ()=>{
-  document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{weekday:'long', year:'numeric', month:'long', day:'numeric'});
+  document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{timeZone:TZ_MX, weekday:'long', year:'numeric', month:'long', day:'numeric'});
   await initFirebase();
   if(sessionStorage.getItem('arqueta_admin_session')){
     currentRole = sessionStorage.getItem('arqueta_admin_session');
@@ -1341,8 +1359,8 @@ function setExportPeriod(days){
   const to = document.getElementById('export-date-to');
   if(days===0){ from.value=''; to.value=''; }
   else {
-    to.value = new Date().toISOString().slice(0,10);
-    from.value = new Date(new Date()-days*86400000).toISOString().slice(0,10);
+    to.value = hoyMX();
+    from.value = haceDiasMX(days);
   }
 }
 function setExportPeriodOC(days){
@@ -1350,8 +1368,8 @@ function setExportPeriodOC(days){
   const to = document.getElementById('export-oc-to');
   if(days===0){ from.value=''; to.value=''; }
   else {
-    to.value = new Date().toISOString().slice(0,10);
-    from.value = new Date(new Date()-days*86400000).toISOString().slice(0,10);
+    to.value = hoyMX();
+    from.value = haceDiasMX(days);
   }
 }
 function exportOCReportFromTab(){
@@ -1427,7 +1445,7 @@ function renderInicio(){
   const totalClients = DB.clients.length;
   const totalQuotes = DB.quotes.length;
 
-  const now = new Date(); const d30 = new Date(now - 30*86400000).toISOString().slice(0,10);
+  const now = new Date(); const d30 = haceDiasMX(30);
   const allOCs = (DB.clientOCs||[]);
   const ocs30 = allOCs.filter(o=>o.date_submitted>=d30);
   const ocTotal30 = ocs30.reduce((s,o)=>{
@@ -1490,7 +1508,7 @@ function renderOCCharts(){
     const to = chartCustomTo || '2099-12-31';
     filtered = allOCs.filter(o=>o.date_submitted>=from && o.date_submitted<=to);
   } else {
-    const cutoff = new Date(new Date()-chartPeriod*86400000).toISOString().slice(0,10);
+    const cutoff = haceDiasMX(chartPeriod);
     filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
   }
 
@@ -1703,7 +1721,7 @@ function renderLineChartWithScope(){
   const allOCs = (DB.clientOCs||[]);
   let filtered;
   if(trendScope > 0){
-    const cutoff = new Date(new Date()-trendScope*86400000).toISOString().slice(0,10);
+    const cutoff = haceDiasMX(trendScope);
     filtered = allOCs.filter(o=>o.date_submitted>=cutoff);
   } else {
     filtered = allOCs;
@@ -2019,7 +2037,7 @@ function openQuoteModal(prefillClientId){
   document.getElementById('mq-version').value='';
   document.getElementById('mq-descuento').value='';
   document.getElementById('mq-inserto').checked=false;
-  document.getElementById('mq-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('mq-date').value = hoyMX();
   document.getElementById('mq-status').value='borrador';
   document.getElementById('mq-sustrato').value='';
   document.getElementById('mq-calibre').value='';
@@ -2737,7 +2755,7 @@ function openPOModal(ocId){
     }
   } else {
     document.getElementById('mp-number').value='';
-    document.getElementById('mp-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('mp-date').value = hoyMX();
     document.getElementById('mp-fecha-deseada').value='';
     document.getElementById('mp-urgente').checked=false;
     for(let i=0;i<3;i++) addAdminOCLine();
@@ -2835,7 +2853,7 @@ function renderPOList(){
   const fDays = Number(document.getElementById('oc-filter-days').value)||0;
   if(fClient) cocs = cocs.filter(o=>o.client_id===fClient);
   if(fStatus) cocs = cocs.filter(o=>o.status===fStatus);
-  if(fDays>0){ const cutoff = new Date(new Date()-fDays*86400000).toISOString().slice(0,10); cocs = cocs.filter(o=>o.date_submitted>=cutoff); }
+  if(fDays>0){ const cutoff = haceDiasMX(fDays); cocs = cocs.filter(o=>o.date_submitted>=cutoff); }
 
   // Activas arriba; facturadas y rechazadas se van al archivo comprimido
   const archivadas = cocs.filter(o=>OC_ARCHIVADAS.includes(o.status));
@@ -2926,7 +2944,7 @@ function marcarFacturada(id){
   const num = prompt('Número de factura para la OC ' + oc.oc_number + ' (opcional):', oc.factura_numero||'');
   if(num===null) return;
   oc.factura_numero = num.trim();
-  oc.factura_fecha = new Date().toISOString().slice(0,10);
+  oc.factura_fecha = hoyMX();
   oc.status = 'facturada';
   saveData(); renderPOList(); renderInicio();
   if(currentClientId) renderClientOCs();
@@ -3260,7 +3278,7 @@ function ctrlLoadJobs(input){
       // Populate selector
       const sel = document.getElementById('ctrl-job-select');
       sel.innerHTML = '<option value="">Selecciona un job...</option>' + ctrlJobsData.map((j,i)=>{
-        const dateStr = j.ordered ? new Date(j.ordered).toLocaleDateString('es-MX',{month:'short',day:'numeric'}) : '';
+        const dateStr = j.ordered ? new Date(j.ordered).toLocaleDateString('es-MX',{timeZone:TZ_MX, month:'short',day:'numeric'}) : '';
         return `<option value="${i}">${j.job} — ${j.description} (${j.customer}) ${dateStr}</option>`;
       }).join('');
       document.getElementById('ctrl-job-selector').style.display='';
@@ -3674,7 +3692,7 @@ function ctrlSave(){
   const real = ctrlGetRealData();
   if(!DB.controllerHistory) DB.controllerHistory = [];
   DB.controllerHistory.push({
-    id: uid('ctrl'), date: new Date().toISOString().slice(0,10),
+    id: uid('ctrl'), date: hoyMX(),
     client_name: cl?.name||'', quote_number: q?.quote_number||'', product_name: q?.product_name||'',
     quote_id: qid, tier_qty: tierQty, modo: quoted?.modo || '',
     fuente: ctrlExcelOrigen || 'base de datos', pedido_b31: ctrlExcelB31 || null,
@@ -3686,14 +3704,14 @@ function ctrlSave(){
 function ctrlPresetChanged(){
   const p = document.getElementById('ctrl-f-preset').value;
   const from = document.getElementById('ctrl-f-from'), to = document.getElementById('ctrl-f-to');
-  const iso = d => d.toISOString().slice(0,10);
+  const isoMX = d => hoyMX(d);
   const now = new Date();
   if(p==='custom'){ ctrlRenderHistory(); return; }
   if(p==='all'){ from.value=''; to.value=''; }
-  else if(p==='thismonth'){ from.value=iso(new Date(now.getFullYear(),now.getMonth(),1)); to.value=iso(new Date(now.getFullYear(),now.getMonth()+1,0)); }
-  else if(p==='lastmonth'){ from.value=iso(new Date(now.getFullYear(),now.getMonth()-1,1)); to.value=iso(new Date(now.getFullYear(),now.getMonth(),0)); }
-  else if(p==='ytd'){ from.value=iso(new Date(now.getFullYear(),0,1)); to.value=iso(now); }
-  else { const d=new Date(now); d.setDate(d.getDate()-Number(p)); from.value=iso(d); to.value=iso(now); }
+  else if(p==='thismonth'){ from.value=isoMX(new Date(now.getFullYear(),now.getMonth(),1)); to.value=isoMX(new Date(now.getFullYear(),now.getMonth()+1,0)); }
+  else if(p==='lastmonth'){ from.value=isoMX(new Date(now.getFullYear(),now.getMonth()-1,1)); to.value=isoMX(new Date(now.getFullYear(),now.getMonth(),0)); }
+  else if(p==='ytd'){ from.value=isoMX(new Date(now.getFullYear(),0,1)); to.value=hoyMX(now); }
+  else { const d=new Date(now); d.setDate(d.getDate()-Number(p)); from.value=iso(d); to.value=hoyMX(now); }
   ctrlRenderHistory();
 }
 function ctrlCustomDates(){
@@ -3895,7 +3913,7 @@ async function filesDownloadZip(){
     const blob = await zip.generateAsync({type:'blob', compression:'DEFLATE', compressionOptions:{level:6}});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = 'Arqueta_archivos_' + new Date().toISOString().slice(0,10) + '.zip';
+    a.href = url; a.download = 'Arqueta_archivos_' + hoyMX() + '.zip';
     document.body.appendChild(a); a.click();
     setTimeout(()=>{ try{ a.remove(); URL.revokeObjectURL(url); }catch(_){} }, 120000);
     showToast(ok + ' archivo(s) en el ZIP' + (fail ? ' · ' + fail + ' no estaban en la nube' : ''));
@@ -4143,7 +4161,7 @@ function ctrlExportHistory(){
     ['Costo Variable Total','cvt'],['Valor de Venta','venta']];
   const resumen = [
     ['ARQUETA FOLDING — Reporte Controller: cotizado vs real'],
-    ['Generado', new Date().toLocaleString('es-MX')],
+    ['Generado', ahoraMX()],
     ['Periodo', from + '  a  ' + to],
     ['Cliente', cli],
     ['Comparaciones', list.length],
@@ -4221,7 +4239,7 @@ function ctrlExportHistory(){
   XLSX.utils.book_append_sheet(wb, s2, 'Detalle');
   XLSX.utils.book_append_sheet(wb, s3, 'Por cliente');
   XLSX.utils.book_append_sheet(wb, s4, 'Por mes');
-  XLSX.writeFile(wb, 'Controller_Arqueta_'+new Date().toISOString().slice(0,10)+'.xlsx');
+  XLSX.writeFile(wb, 'Controller_Arqueta_'+hoyMX()+'.xlsx');
   showToast(list.length+' comparaciones exportadas');
 }
 function ctrlDelete(id){
