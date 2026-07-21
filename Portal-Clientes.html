@@ -101,6 +101,8 @@ tr:last-child td{border-bottom:none;}
 .ol-aviso .a-warn{color:#C08A3E;}
 .ol-aviso .a-bad{color:#A63A3A;font-weight:600;}
 .ol-letras{font-size:10.5px;color:var(--muted);margin-top:3px;min-height:13px;}
+.ol-lock{background:none;border:none;cursor:pointer;font-size:11px;padding:0 2px;opacity:.6;}
+.ol-lock:hover{opacity:1;}
 .oc-line .field{margin:0;}
 .oc-line .remove-line{background:none;border:none;color:var(--brick);font-size:18px;line-height:1;padding:6px;cursor:pointer;}
 .pdf-link{display:inline-flex;align-items:center;gap:6px;margin-top:10px;padding:6px 12px;background:var(--kraft-soft);border-radius:4px;color:var(--kraft);font-size:12px;font-weight:600;text-decoration:none;}
@@ -408,7 +410,8 @@ function addOCLine(){
     '<div class="field"><label>Código</label><input type="text" class="ol-codigo" placeholder="SKU-001"></div>'+
     '<div class="field"><label>Cantidad (pza)</label><input type="text" inputmode="numeric" autocomplete="off" class="ol-qty" placeholder="25,000" oninput="formatearMiles(this);calcLineTotal(this)">'+
       '<div class="ol-letras"></div></div>'+
-    '<div class="field"><label>Precio unitario</label><input type="number" step="0.0001" class="ol-price" placeholder="1.00" oninput="calcLineTotal(this)"></div>'+
+    '<div class="field"><label>Precio unitario <button type="button" class="ol-lock" onclick="alternarPrecio(this)" title="Editar el precio a mano">🔒</button></label>'+
+      '<input type="number" step="0.0001" class="ol-price" placeholder="1.00" oninput="calcLineTotal(this)"></div>'+
     '<div class="field"><label>Valor total sin impuesto</label><div class="ol-total" style="padding:10px 0;font-weight:600;font-family:\'JetBrains Mono\',monospace;font-size:13px;">$0.00</div></div>'+
     '<button class="remove-line" onclick="this.parentElement.remove();totalOrden()" title="Quitar línea">✕</button>'+
     '<input type="hidden" class="ol-product">'+
@@ -416,13 +419,40 @@ function addOCLine(){
   wrap.appendChild(div);
 }
 
+function alternarPrecio(btn){
+  const line = btn.closest('.oc-line');
+  const campo = line.querySelector('.ol-price');
+  const qid = line.querySelector('.ol-quote').value;
+  if(!qid){ showToast('Sin cotización el precio ya es editable'); return; }
+  const manual = campo.dataset.manual === '1';
+  if(manual){
+    delete campo.dataset.manual;                 // volver al precio de la cotización
+    campo.readOnly = true;
+    campo.style.background = 'var(--paper-raised)';
+    btn.textContent = '🔒';
+    btn.title = 'Editar el precio a mano';
+  }else{
+    campo.dataset.manual = '1';
+    campo.readOnly = false;
+    campo.style.background = '';
+    btn.textContent = '✎';
+    btn.title = 'Volver al precio de la cotización';
+    campo.focus(); campo.select();
+    showToast('Precio manual: Arqueta lo va a revisar');
+  }
+  calcLineTotal(campo);
+}
+
 function cotizacionElegida(sel){
   const line = sel.closest('.oc-line');
   const q = (DB.quotes||[]).find(x=>x.id===sel.value);
   line.querySelector('.ol-product').value = q ? q.product_name : '';
   const precio = line.querySelector('.ol-price');
-  precio.readOnly = !!q;                       // con cotización, el precio no se teclea
+  const btn = line.querySelector('.ol-lock');
+  delete precio.dataset.manual;                // al cambiar de cotización se recalcula
+  precio.readOnly = !!q;
   precio.style.background = q ? 'var(--paper-raised)' : '';
+  if(btn){ btn.textContent = q ? '🔒' : '✎'; btn.style.display = q ? '' : 'none'; }
   if(!q) precio.value = '';
   calcLineTotal(precio);
 }
@@ -492,16 +522,22 @@ function revisarLinea(line){
     } else {
       const esperado = precioDeEscalon(esc);
       if(esperado){
-        if(!precio){
-          line.querySelector('.ol-price').value = esperado.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+        const campoPrecio = line.querySelector('.ol-price');
+        const manual = campoPrecio.dataset.manual === '1';
+        if(!manual){
+          // El precio es derivado: al cambiar la cantidad cambia de escalón y se
+          // actualiza al instante. Así nunca queda pegado al escalón anterior.
+          const nuevo = esperado.toFixed(4).replace(/0+$/,'').replace(/\.$/,'');
+          if(campoPrecio.value !== nuevo) campoPrecio.value = nuevo;
         } else {
-          const dif = (precio - esperado)/esperado;
+          const dif = (leerNumero(campoPrecio) - esperado)/esperado;
+          const precioM = leerNumero(campoPrecio);
           if(dif < -TOL_BAJA){
             subir('bad');
-            avisos.push(['bad','Precio '+money(precio)+' está por debajo de '+money(esperado)+', que es el del escalón de '+qty(esc.quantity_tier)+' pza ('+(dif*100).toFixed(1)+'%).']);
+            avisos.push(['bad','Precio '+money(precioM)+' está por debajo de '+money(esperado)+', que es el del escalón de '+qty(esc.quantity_tier)+' pza ('+(dif*100).toFixed(1)+'%).']);
           } else if(dif > TOL_ALTA){
             subir('warn');
-            avisos.push(['warn','Estás pagando '+money(precio)+' cuando a '+qty(cant)+' pza te toca '+money(esperado)+'. Revísalo con Arqueta.']);
+            avisos.push(['warn','Estás pagando '+money(precioM)+' cuando a '+qty(cant)+' pza te toca '+money(esperado)+'. Revísalo con Arqueta.']);
           }
         }
       }
@@ -511,7 +547,8 @@ function revisarLinea(line){
         subir('warn');
         avisos.push(['warn','Pides '+(exceso*100).toFixed(0)+'% más que el escalón de '+qty(esc.quantity_tier)+' pza. Arqueta va a verificar factibilidad de producción.']);
       }
-      if(nivel==='ok' && precio) avisos.push(['ok','Coincide con el escalón de '+qty(esc.quantity_tier)+' pza a '+money(esperado)+'.']);
+      const precioFinal = leerNumero(line.querySelector('.ol-price'));
+      if(nivel==='ok' && precioFinal) avisos.push(['ok','Escalón de '+qty(esc.quantity_tier)+' pza · '+money(precioFinal)+' por pieza.']);
     }
 
     // --- Comparación contra su propio historial ---
@@ -568,6 +605,7 @@ function submitOC(){
       product: (el.querySelector('.ol-product').value||'').trim(),
       quantity: leerNumero(el.querySelector('.ol-qty')),
       unit_price: leerNumero(el.querySelector('.ol-price')),
+      precio_manual: el.querySelector('.ol-price').dataset.manual === '1',
       quote_id: qid || '',
       quote_number: q ? q.quote_number : '',
       alerta: rev.nivel,                                  // ok | warn | bad
