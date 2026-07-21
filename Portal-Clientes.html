@@ -606,19 +606,100 @@ function submitOC(){
     };
   }).filter(l=>l.product && l.quantity>0);
 
-  const rojas = lines.filter(l=>l.alerta==='bad').length;
-  const amarillas = lines.filter(l=>l.alerta==='warn').length;
-  if(rojas || amarillas){
-    const msg = (rojas? rojas+' línea(s) con alerta roja. ':'') + (amarillas? amarillas+' con alerta amarilla. ':'')
-      + '\n\nLa orden se envía marcada y Arqueta la revisará antes de aceptarla.\n\n¿Enviar de todos modos?';
-    if(!confirm(msg)) return;
-  }
-
   const fechaDeseada = document.getElementById('oc-fecha-deseada').value;
   const urgente = document.getElementById('oc-urgente').checked;
 
-  if(!ocNumber){ showToast('Escribe el número de OC'); return; }
-  if(!lines.length){ showToast('Agrega al menos un producto con nombre y cantidad'); return; }
+  // ---- Revisión previa: qué falta y qué viene marcado ----
+  const faltantes = [];
+  if(!ocNumber) faltantes.push('Número de orden de compra');
+  if(!fechaDeseada) faltantes.push('Fecha deseada de entrega');
+
+  Array.from(document.querySelectorAll('.oc-line')).forEach((el, i)=>{
+    const cot   = el.querySelector('.ol-quote').value;
+    const prod  = (el.querySelector('.ol-product').value||'').trim();
+    const cod   = (el.querySelector('.ol-codigo').value||'').trim();
+    const cant  = leerNumero(el.querySelector('.ol-qty'));
+    const prec  = leerNumero(el.querySelector('.ol-price'));
+    const vacia = !cot && !prod && !cod && !cant && !prec;
+    if(vacia) return;                                  // renglón sin usar, se ignora
+    const n = 'Línea ' + (i+1) + ': ';
+    if(!cot && !prod) faltantes.push(n + 'falta elegir cotización o escribir el producto');
+    if(!cod)  faltantes.push(n + 'falta el código');
+    if(!cant) faltantes.push(n + 'falta la cantidad');
+    if(!prec) faltantes.push(n + 'falta el precio unitario');
+  });
+
+  if(!lines.length) faltantes.push('No hay ningún producto capturado');
+
+  const bloquea = !ocNumber || !lines.length;
+  const rojas = lines.filter(l=>l.alerta==='bad');
+  const amarillas = lines.filter(l=>l.alerta==='warn');
+  const subtotal = lines.reduce((a,l)=>a + l.quantity*l.unit_price, 0);
+
+  mostrarConfirmacionOC({faltantes, bloquea, rojas, amarillas, lines, subtotal, ocNumber, fechaDeseada, urgente});
+}
+
+/* Ventana de confirmación antes de enviar */
+function mostrarConfirmacionOC(d){
+  const prev = document.getElementById('oc-confirm'); if(prev) prev.remove();
+  const li = (txt, cls) => '<li style="margin:3px 0;color:'+cls+';">'+txt+'</li>';
+
+  let cuerpo = '';
+  if(d.faltantes.length){
+    cuerpo += '<div style="margin-bottom:14px;"><div style="font-weight:700;font-size:13px;color:#A63A3A;margin-bottom:4px;">Campos por llenar</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:12.5px;">' + d.faltantes.map(f=>li(f,'#A63A3A')).join('') + '</ul></div>';
+  }
+  if(d.rojas.length){
+    cuerpo += '<div style="margin-bottom:14px;"><div style="font-weight:700;font-size:13px;color:#A63A3A;margin-bottom:4px;">Alertas rojas (' + d.rojas.length + ')</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:12.5px;">' + d.rojas.flatMap(l=>l.avisos.map(a=>li(l.product+': '+a,'#A63A3A'))).join('') + '</ul></div>';
+  }
+  if(d.amarillas.length){
+    cuerpo += '<div style="margin-bottom:14px;"><div style="font-weight:700;font-size:13px;color:#C08A3E;margin-bottom:4px;">Alertas amarillas (' + d.amarillas.length + ')</div>'
+      + '<ul style="margin:0;padding-left:18px;font-size:12.5px;">' + d.amarillas.flatMap(l=>l.avisos.map(a=>li(l.product+': '+a,'#C08A3E'))).join('') + '</ul></div>';
+  }
+  if(!d.faltantes.length && !d.rojas.length && !d.amarillas.length){
+    cuerpo += '<div style="color:#2F6F62;font-size:13px;margin-bottom:14px;">✓ Todo está completo y los precios coinciden con tus cotizaciones.</div>';
+  }
+
+  const resumen = d.lines.length
+    ? '<div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;">'
+      + '<div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Orden</span><strong class="mono">'+(d.ocNumber||'—')+'</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Productos</span><strong>'+d.lines.length+'</strong></div>'
+      + '<div style="display:flex;justify-content:space-between;"><span style="color:var(--muted);">Entrega deseada</span><strong>'+(d.fechaDeseada||'sin definir')+'</strong></div>'
+      + (d.urgente?'<div style="color:#A63A3A;font-weight:700;margin-top:4px;">URGENTE</div>':'')
+      + '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--line);margin-top:6px;padding-top:6px;"><span style="color:var(--muted);">Total con IVA</span><strong class="mono">'+money(d.subtotal*1.16)+'</strong></div>'
+      + '</div>'
+    : '';
+
+  const m = document.createElement('div');
+  m.id = 'oc-confirm';
+  m.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(20,26,34,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+  m.innerHTML = '<div style="background:#fff;border-radius:10px;max-width:560px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px;">'
+    + '<h2 style="margin:0 0 4px;font-size:19px;">¿Seguro que quieres mandar la orden de compra?</h2>'
+    + '<div style="color:var(--muted);font-size:12.5px;margin-bottom:16px;">Revisa antes de enviar. Una vez enviada, Arqueta la recibe para revisión.</div>'
+    + resumen + cuerpo
+    + (d.bloquea ? '<div style="background:#FBEDEA;border:1px solid #A63A3A;border-radius:6px;padding:10px 14px;font-size:12.5px;color:#A63A3A;margin-bottom:14px;">Falta información obligatoria. Complétala para poder enviar.</div>'
+                 : (d.rojas.length||d.amarillas.length ? '<div style="font-size:12.5px;color:var(--muted);margin-bottom:14px;">La orden se envía marcada y Arqueta la revisará antes de aceptarla.</div>' : ''))
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;">'
+    + '<button class="btn btn-secondary" onclick="document.getElementById(\'oc-confirm\').remove()">Cancelar</button>'
+    + (d.bloquea ? '' : '<button class="btn btn-primary" onclick="confirmarEnvioOC()">Sí, enviar orden</button>')
+    + '</div></div>';
+  m.addEventListener('click', e=>{ if(e.target===m) m.remove(); });
+  document.body.appendChild(m);
+  window._ocPendiente = d;
+}
+
+function confirmarEnvioOC(){
+  const el = document.getElementById('oc-confirm'); if(el) el.remove();
+  const d = window._ocPendiente;
+  if(d) enviarOCConfirmada(d);
+}
+
+function enviarOCConfirmada(d){
+  const ocNumber = d.ocNumber, lines = d.lines;
+  const fechaDeseada = d.fechaDeseada, urgente = d.urgente;
+  const notes = document.getElementById('oc-notes').value.trim();
+  const fileInput = document.getElementById('oc-file');
 
   const finish = async (fileName, fileData) => {
     if(!DB.clientOCs) DB.clientOCs = [];
