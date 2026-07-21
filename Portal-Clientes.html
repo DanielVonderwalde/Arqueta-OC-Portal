@@ -238,6 +238,24 @@ function money(n){
   return '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
 }
 function qty(n){ return Number(n).toLocaleString('es-MX'); }
+
+/* ---------- Fechas en horario de Ciudad de México ----------
+   toISOString() devuelve UTC. Después de las 18:00 hora del centro, UTC ya
+   está en el día siguiente, así que las OCs y respaldos se guardaban con la
+   fecha de mañana. Todo pasa por aquí para usar America/Mexico_City.       */
+const TZ_MX = 'America/Mexico_City';
+function hoyMX(d){
+  // en-CA da formato YYYY-MM-DD
+  return new Intl.DateTimeFormat('en-CA', {timeZone: TZ_MX, year:'numeric', month:'2-digit', day:'2-digit'})
+    .format(d ? new Date(d) : new Date());
+}
+function haceDiasMX(dias){
+  return hoyMX(Date.now() - dias*86400000);
+}
+function ahoraMX(){
+  return new Intl.DateTimeFormat('es-MX', {timeZone: TZ_MX, dateStyle:'medium', timeStyle:'short'}).format(new Date());
+}
+
 function uid(p){ return p+'-'+Math.random().toString(36).slice(2,9); }
 const statusLabel = {vigente:'Vigente', borrador:'En preparación', vencida:'Vencida'};
 /* Las cotizaciones en borrador son internas: nunca se muestran al cliente. */
@@ -375,7 +393,7 @@ function submitOC(){
       notes: notes,
       fileName: fileName||'',
       fileData: fileData||'',
-      date_submitted: new Date().toISOString().slice(0,10),
+      date_submitted: hoyMX(),
       fecha_deseada: fechaDeseada,
       urgente: urgente,
       status: 'pendiente'
@@ -425,7 +443,7 @@ function renderMyOCs(client){
 
   let ocs = allOcs;
   if(ocFilterDays>0){
-    const cutoff = new Date(new Date() - ocFilterDays*86400000).toISOString().slice(0,10);
+    const cutoff = haceDiasMX(ocFilterDays);
     ocs = allOcs.filter(o=>o.date_submitted>=cutoff);
   }
 
