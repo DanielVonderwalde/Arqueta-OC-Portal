@@ -2707,6 +2707,7 @@ function clearFile(kind){
    ========================================================= */
 let editingOCId = null;
 function openPOModal(ocId){
+  if(ocId && currentRole!=='admin'){ showToast('Solo el administrador puede editar órdenes de compra'); return; }
   editingOCId = ocId || null;
   populateClientSelect('mp-client');
   document.getElementById('mp-notes').value='';
@@ -2863,8 +2864,11 @@ function renderPOList(){
         const statusBadge = o.status==='recibida' ? '<span class="badge badge-match-yes">Recibida</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
         const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
         const fechaDeseada = o.fecha_deseada ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">Entrega: ${o.fecha_deseada}</div>` : '';
-        const editBtn = `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" onclick="openPOModal('${o.id}')">✏</button>`;
-        const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>` : `<div style="display:flex;gap:4px;">${editBtn}${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada y archivar" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button><button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button></div>`;
+        // Editar y borrar OCs: solo admin. El asociado sí puede cambiar el estado.
+        const esAdmin = currentRole === 'admin';
+        const editBtn = esAdmin ? `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" onclick="openPOModal('${o.id}')">✏</button>` : '';
+        const delBtn  = esAdmin ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : '';
+        const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>${delBtn}</div>` : `<div style="display:flex;gap:4px;">${editBtn}${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada y archivar" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>${delBtn}</div>`;
         html += `<tr><td class="mono">${o.oc_number}${urgentBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
       });
     }
@@ -2909,7 +2913,7 @@ function renderOCArchivo(list){
       <td style="padding:6px 10px;">${badge}</td>
       <td style="padding:6px 10px;"><div style="display:flex;gap:4px;">
         <button class="btn btn-ghost" style="font-size:11px;" title="Regresar a activas" onclick="setClientOCStatus('${o.id}','recibida')">↩</button>
-        <button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>
+        ${currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : ''}
       </div></td></tr>`;
   });
   return html;
@@ -2934,6 +2938,7 @@ function setClientOCStatus(id, newStatus){
   if(oc){ oc.status = newStatus; saveData(); renderPOList(); showToast('Estado actualizado: '+newStatus); }
 }
 function deleteClientOC(id){
+  if(currentRole!=='admin'){ showToast('Solo el administrador puede eliminar órdenes de compra'); return; }
   if(!confirm('¿Eliminar esta orden de compra del cliente?')) return;
   DB.clientOCs = (DB.clientOCs||[]).filter(o=>o.id!==id);
   saveData(); renderPOList(); showToast('Orden eliminada');
