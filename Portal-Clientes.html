@@ -374,9 +374,8 @@ function showPortal(client){
 
 /* ===================== REGLAS DE VALIDACIÓN =====================
    TOL_BAJA  1%  -> pagar menos de lo que toca = rojo
-   TOL_ALTA  5%  -> pagar bastante más de lo que toca = amarillo
-   EXCEDENTE 25% -> muy por encima del escalón = revisar producción      */
-const TOL_BAJA = 0.01, TOL_ALTA = 0.05, EXCEDENTE = 0.25;
+   TOL_ALTA  5%  -> pagar bastante más de lo que toca = amarillo        */
+const TOL_BAJA = 0.01, TOL_ALTA = 0.05;
 
 function cotizacionesVigentes(){
   if(!currentClient) return [];
@@ -540,12 +539,6 @@ function revisarLinea(line){
             avisos.push(['warn','Estás pagando '+money(precioM)+' cuando a '+qty(cant)+' pza te toca '+money(esperado)+'. Revísalo con Arqueta.']);
           }
         }
-      }
-      // Excedente grande sobre el escalón: puede cambiar el costo de producción
-      const exceso = (cant - esc.quantity_tier)/esc.quantity_tier;
-      if(exceso > EXCEDENTE){
-        subir('warn');
-        avisos.push(['warn','Pides '+(exceso*100).toFixed(0)+'% más que el escalón de '+qty(esc.quantity_tier)+' pza. Arqueta va a verificar factibilidad de producción.']);
       }
       const precioFinal = leerNumero(line.querySelector('.ol-price'));
       if(nivel==='ok' && precioFinal) avisos.push(['ok','Escalón de '+qty(esc.quantity_tier)+' pza · '+money(precioFinal)+' por pieza.']);
