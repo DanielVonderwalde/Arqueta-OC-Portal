@@ -634,7 +634,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
           <div class="field"><label>Cotización</label><select id="ctrl-quote" onchange="ctrlQuoteChanged()"><option value="">Selecciona cotización...</option></select></div>
         </div>
         <div class="formrow" style="grid-template-columns:1fr 1fr;gap:12px;">
-          <div class="field"><label>Cantidad a comparar (pza)</label><input type="number" id="ctrl-tier" placeholder="Se llena del Job o escríbela" onchange="ctrlTierChanged()"></div>
+          <div class="field"><label>Cantidad a comparar (pza)</label><input type="text" inputmode="numeric" autocomplete="off" id="ctrl-tier" placeholder="Se llena del Job o escríbela" oninput="formatearMiles(this)" onchange="ctrlTierChanged()"></div>
           <div class="field"><label>Precio cotizado por pieza <span style="font-weight:400;color:var(--muted);">— este manda</span></label><input type="number" step="0.0001" id="ctrl-quoted-price" placeholder="Ej: 6.30" onchange="ctrlPriceChanged()" oninput="ctrlPriceChanged()"><div style="font-size:11px;color:var(--muted);margin-top:3px;">El valor de venta = cantidad x este precio. No se toma del Excel.</div></div>
         </div>
         <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin:-4px 0 10px;cursor:pointer;">
@@ -703,7 +703,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
             <summary style="cursor:pointer;font-size:12.5px;font-weight:600;color:var(--kraft);">Mostrar campos manuales</summary>
             <div style="margin-top:10px;">
               <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;">
-                <div class="field" style="margin:0;"><label>Cantidad producida</label><input type="number" id="ctrl-real-qty" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Cantidad producida</label><input type="text" inputmode="numeric" autocomplete="off" id="ctrl-real-qty" oninput="formatearMiles(this)" onchange="ctrlRenderComparison()"></div>
                 <div class="field" style="margin:0;"><label>Valor de venta real</label><input type="number" step="0.01" id="ctrl-real-venta" onchange="ctrlRenderComparison()"></div>
                 <div class="field" style="margin:0;"><label>MC% real</label><input type="number" step="0.01" id="ctrl-real-mc" onchange="ctrlRenderComparison()"></div>
                 <div class="field" style="margin:0;"><label>Precio de venta real</label><input type="number" step="0.01" id="ctrl-real-precio" onchange="ctrlRenderComparison()"></div>
@@ -1186,6 +1186,28 @@ function moneyShort(n){
   return '$' + Number(n).toLocaleString('es-MX',{minimumFractionDigits:0, maximumFractionDigits:0});
 }
 function qty(n){ return Number(n).toLocaleString('es-MX'); }
+
+/* ---------- Separadores de miles mientras se escribe ----------
+   Un input type="number" no puede mostrar comas, así que se usa type="text"
+   con inputmode numérico y se formatea al vuelo. Se le va un cero a
+   cualquiera viendo 1202600; con 1,202,600 el grupo de más salta a la vista. */
+function formatearMiles(input){
+  const antes = input.value;
+  const posDesdeFin = antes.length - input.selectionStart;
+  const digitos = antes.replace(/\D/g,'').replace(/^0+(?=\d)/,'');
+  input.value = digitos ? Number(digitos).toLocaleString('en-US') : '';
+  const nuevaPos = Math.max(0, input.value.length - posDesdeFin);
+  try{ input.setSelectionRange(nuevaPos, nuevaPos); }catch(_){}
+}
+function leerNumero(el){
+  if(!el) return 0;
+  return Number(String(el.value||'').replace(/,/g,'')) || 0;
+}
+function ponerNumero(el, v){
+  if(!el) return;
+  el.value = (v===''||v===null||v===undefined||isNaN(Number(v))) ? '' : Number(v).toLocaleString('en-US');
+}
+
 
 /* ---------- Fechas en horario de Ciudad de México ----------
    toISOString() devuelve UTC. Después de las 18:00 hora del centro, UTC ya
@@ -2747,7 +2769,7 @@ function openPOModal(ocId){
         const el = document.getElementById('mp-lines').lastChild;
         el.querySelector('.mp-codigo').value = l.codigo||'';
         el.querySelector('.mp-product').value = l.product||'';
-        el.querySelector('.mp-qty').value = l.quantity||'';
+        ponerNumero(el.querySelector('.mp-qty'), l.quantity);
         el.querySelector('.mp-price').value = l.unit_price||'';
         calcAdminOCTotal(el.querySelector('.mp-price'));
       });
@@ -2768,7 +2790,7 @@ function addAdminOCLine(){
   div.style.cssText='display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1fr 30px;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;';
   div.innerHTML = '<div class="field" style="margin:0;"><label>Código</label><input type="text" class="mp-codigo" placeholder="SKU"></div>'+
     '<div class="field" style="margin:0;"><label>Producto</label><input type="text" class="mp-product" placeholder="NOMBRE"></div>'+
-    '<div class="field" style="margin:0;"><label>Cantidad</label><input type="number" class="mp-qty" placeholder="25000"></div>'+
+    '<div class="field" style="margin:0;"><label>Cantidad</label><input type="text" inputmode="numeric" autocomplete="off" class="mp-qty" placeholder="25,000" oninput="formatearMiles(this);calcAdminOCTotal(this)"></div>'+
     '<div class="field" style="margin:0;"><label>Precio unit. sin imp.</label><input type="number" step="0.01" class="mp-price" placeholder="1.00" oninput="calcAdminOCTotal(this)"></div>'+
     '<div class="field" style="margin:0;"><label>Valor total</label><div class="mp-total" style="padding:10px 0;font-weight:600;font-family:\'JetBrains Mono\',monospace;font-size:13px;">$0.00</div></div>'+
     '<button style="background:none;border:none;color:var(--brick);font-size:18px;cursor:pointer;" onclick="this.parentElement.remove()">✕</button>';
@@ -2776,7 +2798,7 @@ function addAdminOCLine(){
 }
 function calcAdminOCTotal(input){
   const line = input.closest('div[style*="grid"]');
-  const q = Number(line.querySelector('.mp-qty').value)||0;
+  const q = leerNumero(line.querySelector('.mp-qty'));
   const p = Number(line.querySelector('.mp-price').value)||0;
   line.querySelector('.mp-total').textContent = '$'+(q*p).toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
 }
@@ -2789,7 +2811,7 @@ function savePO(){
   const lines = Array.from(document.getElementById('mp-lines').children).map(el=>({
     codigo: (el.querySelector('.mp-codigo').value||'').trim(),
     product: (el.querySelector('.mp-product').value||'').trim(),
-    quantity: Number(el.querySelector('.mp-qty').value)||0,
+    quantity: leerNumero(el.querySelector('.mp-qty')),
     unit_price: Number(el.querySelector('.mp-price').value)||0
   })).filter(l=>l.product && l.quantity>0);
 
@@ -3222,7 +3244,7 @@ function ctrlQuoteChanged(){
 }
 function ctrlTierChanged(){
   const qid = document.getElementById('ctrl-quote').value;
-  const tierQty = Number(document.getElementById('ctrl-tier').value);
+  const tierQty = leerNumero(document.getElementById('ctrl-tier'));
   if(!qid || !tierQty) return;
   document.getElementById('ctrl-comparison').style.display = '';
   ctrlRenderComparison();
@@ -3298,11 +3320,11 @@ function ctrlJobSelected(){
   if(!j) return;
 
   // Auto-fill all real fields
-  document.getElementById('ctrl-real-qty').value = j.qty_pro || '';
+  ponerNumero(document.getElementById('ctrl-real-qty'), j.qty_pro);
   // La cantidad a comparar sale del Job (AG = QTY/PRO) salvo que se desactive
   const autoQty = document.getElementById('ctrl-qty-from-job');
   if(autoQty && autoQty.checked && j.qty_pro){
-    document.getElementById('ctrl-tier').value = j.qty_pro;
+    ponerNumero(document.getElementById('ctrl-tier'), j.qty_pro);
   }
   document.getElementById('ctrl-real-venta').value = j.invoicing || '';
   ctrlJobMC = j.mc_pct ? j.mc_pct*100 : null;   // MC% que reporta el Job (col Z)
@@ -3339,7 +3361,7 @@ function ctrlVerdict(html, kind){
 }
 
 function ctrlCopyQty(){
-  const v = document.getElementById('ctrl-tier').value;
+  const v = String(document.getElementById('ctrl-tier').value||'').replace(/,/g,'');
   if(!v){ showToast('Primero define la cantidad'); return; }
   navigator.clipboard.writeText(String(v)).then(
     ()=>showToast('Cantidad '+qty(Number(v))+' copiada — pegala en PEDIDO!B31'),
@@ -3378,7 +3400,7 @@ async function ctrlDownloadQuoteExcel(){
       if(f && f.name && !q.excelName) q.excelName = f.name;
     }
     if(!data){ ctrlVerdict('Esta cotizacion no tiene Excel guardado. Subelo primero desde la pestaña Cotizaciones.','bad'); return; }
-    const targetQty = Number(document.getElementById('ctrl-tier').value)||0;
+    const targetQty = leerNumero(document.getElementById('ctrl-tier'));
     const base = (q.quote_number||'cotizacion');
     const name = base + (targetQty ? '_'+targetQty : '') + '.xlsx';
     triggerDownload(data.includes(',')?data:('data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,'+data), name);
@@ -3391,7 +3413,7 @@ function ctrlApplyWorkbook(wb, origen){
   const statusEl = document.getElementById('ctrl-quote-excel-status');
   const tiers = extractCostBreakdownFromWorkbook(wb);
   const b31 = ctrlReadPedidoQty(wb);
-  const target = Number(document.getElementById('ctrl-tier').value)||0;
+  const target = leerNumero(document.getElementById('ctrl-tier'));
 
   if(!tiers.length){
     ctrlVerdict('No se encontro un cost breakdown legible en la hoja <strong>Valor Venta</strong> de este archivo.','bad');
@@ -3486,7 +3508,7 @@ function ctrlPrefillPrice(force){
   if(el.value && !force) return;
   const tiers = ctrlTiersInUse();
   if(!tiers.length) return;
-  const inputQty = Number(document.getElementById('ctrl-tier').value);
+  const inputQty = leerNumero(document.getElementById('ctrl-tier'));
   let t = inputQty ? tiers.find(x=>Number(x.quantity_tier)===inputQty) : null;
   if(!t && inputQty) t = tiers.reduce((b,x)=> Math.abs(x.quantity_tier-inputQty) < Math.abs(b.quantity_tier-inputQty) ? x : b);
   if(!t) t = tiers[0];
@@ -3495,7 +3517,7 @@ function ctrlPrefillPrice(force){
 }
 function ctrlGetQuotedData(){
   const qid = document.getElementById('ctrl-quote').value;
-  const inputQty = Number(document.getElementById('ctrl-tier').value);
+  const inputQty = leerNumero(document.getElementById('ctrl-tier'));
   const warn = document.getElementById('ctrl-qty-warning');
   if(!qid || !inputQty){ if(warn) warn.style.display='none'; return null; }
   const tiers = ctrlTiersInUse();
@@ -3595,7 +3617,8 @@ function ctrlGetQuotedData(){
 function ctrlGetRealData(){
   const real = {};
   ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
-    const v = document.getElementById('ctrl-real-'+f).value;
+    const el = document.getElementById('ctrl-real-'+f);
+    const v = String(el.value||'').replace(/,/g,'');
     real[f] = v==='' ? null : Number(v);
   });
   real.mc_reportado = ctrlJobMC;
@@ -3683,7 +3706,7 @@ function ctrlRenderComparison(){
 }
 function ctrlSave(){
   const qid = document.getElementById('ctrl-quote').value;
-  const tierQty = Number(document.getElementById('ctrl-tier').value);
+  const tierQty = leerNumero(document.getElementById('ctrl-tier'));
   const q = quoteById(qid);
   const cl = clientById(q?.client_id);
   if(!qid||!tierQty){ showToast('Selecciona cotización y cantidad'); return; }
