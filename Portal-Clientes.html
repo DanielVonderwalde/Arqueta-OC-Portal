@@ -239,6 +239,25 @@ function money(n){
 }
 function qty(n){ return Number(n).toLocaleString('es-MX'); }
 
+/* ---------- Separadores de miles mientras se escribe ----------
+   Un input type="number" no puede mostrar comas, así que se usa type="text"
+   con inputmode numérico y se formatea al vuelo. Se le va un cero a
+   cualquiera viendo 1202600; con 1,202,600 el grupo de más salta a la vista. */
+function formatearMiles(input){
+  const antes = input.value;
+  const posDesdeFin = antes.length - input.selectionStart;
+  const digitos = antes.replace(/\D/g,'').replace(/^0+(?=\d)/,'');
+  input.value = digitos ? Number(digitos).toLocaleString('en-US') : '';
+  // Mantener el cursor donde estaba, contando desde el final
+  const nuevaPos = Math.max(0, input.value.length - posDesdeFin);
+  try{ input.setSelectionRange(nuevaPos, nuevaPos); }catch(_){}
+}
+function leerNumero(el){
+  if(!el) return 0;
+  return Number(String(el.value||'').replace(/,/g,'')) || 0;
+}
+
+
 /* ---------- Fechas en horario de Ciudad de México ----------
    toISOString() devuelve UTC. Después de las 18:00 hora del centro, UTC ya
    está en el día siguiente, así que las OCs y respaldos se guardaban con la
@@ -349,7 +368,7 @@ function addOCLine(){
   const lineId = 'ol-'+Math.random().toString(36).slice(2,7);
   div.innerHTML = '<div class="field"><label>Código</label><input type="text" class="ol-codigo" placeholder="SKU-001"></div>'+
     '<div class="field"><label>Producto</label><input type="text" class="ol-product" placeholder="NOMBRE_PRODUCTO"></div>'+
-    '<div class="field"><label>Cantidad (pza)</label><input type="number" class="ol-qty" placeholder="25000" oninput="calcLineTotal(this)"></div>'+
+    '<div class="field"><label>Cantidad (pza)</label><input type="text" inputmode="numeric" autocomplete="off" class="ol-qty" placeholder="25,000" oninput="formatearMiles(this);calcLineTotal(this)"></div>'+
     '<div class="field"><label>Precio unitario sin impuesto</label><input type="number" step="0.01" class="ol-price" placeholder="1.00" oninput="calcLineTotal(this)"></div>'+
     '<div class="field"><label>Valor total sin impuesto</label><div class="ol-total" style="padding:10px 0;font-weight:600;font-family:\'JetBrains Mono\',monospace;font-size:13px;">$0.00</div></div>'+
     '<button class="remove-line" onclick="this.parentElement.remove()" title="Quitar línea">✕</button>';
@@ -357,8 +376,8 @@ function addOCLine(){
 }
 function calcLineTotal(input){
   const line = input.closest('.oc-line');
-  const q = Number(line.querySelector('.ol-qty').value)||0;
-  const p = Number(line.querySelector('.ol-price').value)||0;
+  const q = leerNumero(line.querySelector('.ol-qty'));
+  const p = leerNumero(line.querySelector('.ol-price'));
   const total = q*p;
   line.querySelector('.ol-total').textContent = '$'+total.toLocaleString('es-MX',{minimumFractionDigits:2, maximumFractionDigits:2});
 }
@@ -373,8 +392,8 @@ function submitOC(){
   const lines = Array.from(document.querySelectorAll('.oc-line')).map(el=>({
     codigo: (el.querySelector('.ol-codigo').value||'').trim(),
     product: (el.querySelector('.ol-product').value||'').trim(),
-    quantity: Number(el.querySelector('.ol-qty').value)||0,
-    unit_price: Number(el.querySelector('.ol-price').value)||0
+    quantity: leerNumero(el.querySelector('.ol-qty')),
+    unit_price: leerNumero(el.querySelector('.ol-price'))
   })).filter(l=>l.product && l.quantity>0);
 
   const fechaDeseada = document.getElementById('oc-fecha-deseada').value;
