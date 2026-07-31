@@ -1088,7 +1088,8 @@ function aArreglo(v){
 }
 function normalizarDB(d){
   if(!d || typeof d !== 'object') return d;
-  for(const c of COLECCIONES_DB){ if(c in d) d[c] = aArreglo(d[c]); }
+  // Se garantiza que toda coleccion exista como arreglo, aunque Firebase la haya omitido por estar vacia.
+  for(const c of COLECCIONES_DB){ d[c] = aArreglo(d[c]); }
   return d;
 }
 function claveCosto(r){
