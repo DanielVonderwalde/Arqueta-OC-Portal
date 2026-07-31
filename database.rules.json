@@ -4,23 +4,35 @@
     ".write": false,
 
     "arqueta_db": {
-      "clients": { ".indexOn": ["id", "portal_email", "portal_active"] },
-      "quotes": { ".indexOn": ["id", "client_id", "status", "date"] },
-      "costBreakdown": { ".indexOn": ["id", "quote_id"] },
-      "clientOCs": { ".indexOn": ["id", "client_id", "status", "date_submitted"] },
-      "purchaseOrders": { ".indexOn": ["id", "quote_id", "client_id", "status"] }
+      "clients": { ".indexOn": ["id", "portal_email", "portal_active", "activo"] },
+      "quotes": { ".indexOn": ["id", "client_id", "status", "date", "activo"] },
+      "costBreakdown": { ".indexOn": ["id", "quote_id", "activo"] },
+      "clientOCs": { ".indexOn": ["id", "client_id", "status", "date_submitted", "activo"] },
+      "purchaseOrders": { ".indexOn": ["id", "quote_id", "client_id", "status", "activo"] },
+      "notifEmails": { ".indexOn": ["id"] }
+    },
+
+    "arqueta_files": {
+      ".read": false,
+      ".write": false
+    },
+
+    "arqueta_backups": {
+      ".read": false,
+      ".write": false
     },
 
     "documents": {
-      ".indexOn": ["quote_id", "client_oc_id", "client_id"]
+      ".indexOn": ["id", "quote_id", "client_oc_id", "client_id"]
     },
 
     "private": {
       "credentials": {
-        "users": { ".indexOn": ["user", "role"] },
-        "clients": { ".indexOn": ["email_lower"] }
+        "users": { ".indexOn": ["user", "role", "activo"] },
+        "clients": { ".indexOn": ["email_lower", "activo"] }
       },
-      "sessions": { ".indexOn": ["sub"] }
+      "sessions": { ".indexOn": ["sub"] },
+      "auditLog": { ".indexOn": ["at", "actor", "targetId"] }
     }
   }
 }
