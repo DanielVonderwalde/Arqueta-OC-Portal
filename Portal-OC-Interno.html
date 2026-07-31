@@ -1066,7 +1066,62 @@ function seedData(){
 const fbFilesRef = firebase.database().ref('arqueta_files');
 const fbBackupsRef = firebase.database().ref('arqueta_backups');
 
+/* ============================================================
+   Mapas indexados por id  (migracion arreglos -> mapas)
+   Lectura : acepta arreglo (legado) o mapa indexado y siempre
+             devuelve un arreglo, respetando el orden original.
+   Escritura: guarda un mapa cuyas claves son los ids, para que
+             la API pueda leer/actualizar por id sin escanear.
+   Es idempotente: si ya hay arreglos, no hace nada.
+   ============================================================ */
+const COLECCIONES_POR_ID = ['quotes','clients','clientOCs','purchaseOrders','controllerHistory'];
+const COLECCIONES_DB = COLECCIONES_POR_ID.concat(['costBreakdown','notifEmails']);
+function aArreglo(v){
+  if(v === null || v === undefined) return [];
+  if(Array.isArray(v)) return v.filter(x=>x !== null && x !== undefined);
+  if(typeof v !== 'object') return [];
+  const arr = Object.keys(v).map(k=>v[k]).filter(x=>x !== null && x !== undefined);
+  if(arr.length && arr.every(x=>x && typeof x === 'object' && typeof x._orden === 'number')){
+    arr.sort((a,b)=>a._orden - b._orden);
+  }
+  return arr;
+}
+function normalizarDB(d){
+  if(!d || typeof d !== 'object') return d;
+  for(const c of COLECCIONES_DB){ if(c in d) d[c] = aArreglo(d[c]); }
+  return d;
+}
+function claveCosto(r){
+  const t = Number(r && r.quantity_tier) || 0;
+  return 'cb-' + ((r && r.quote_id) || 'sin') + '-' + String(t).padStart(9,'0');
+}
+function aMapaIndexado(arr, claveFn){
+  const m = {};
+  aArreglo(arr).forEach((reg, i)=>{
+    if(!reg || typeof reg !== 'object') return;
+    reg._orden = i;
+    let k = claveFn(reg, i);
+    if(typeof k !== 'string' || !k) k = 'x-' + i;
+    k = k.replace(/[.#$\[\]\/]/g, '_');
+    if(m[k]) k = k + '-' + i;
+    m[k] = reg;
+  });
+  return m;
+}
+function paraGuardar(d){
+  if(!d || typeof d !== 'object') return d;
+  const salida = {};
+  for(const k of Object.keys(d)) salida[k] = d[k];
+  for(const c of COLECCIONES_POR_ID){
+    if(c in salida) salida[c] = aMapaIndexado(salida[c], (reg,i)=> (typeof reg.id === 'string' && reg.id) ? reg.id : (c + '-' + i));
+  }
+  if('costBreakdown' in salida) salida.costBreakdown = aMapaIndexado(salida.costBreakdown, claveCosto);
+  if('notifEmails' in salida) salida.notifEmails = aArreglo(salida.notifEmails);
+  return salida;
+}
+
 function saveData(){
+  normalizarDB(DB);
   // Save files to Firebase in a SEPARATE path (one file per key, not all at once)
   const files = extractFiles(DB);
   for(const [key, fileObj] of Object.entries(files)){
@@ -1085,7 +1140,7 @@ function saveData(){
   (lite.clientOCs||[]).forEach(o=>{
     if(o.fileData && o.fileData.length > 100){ o.fileData = '[cloud]'; }
   });
-  fbRef.set(lite).catch(e=>console.error('Firebase write error:',e));
+  fbRef.set(paraGuardar(lite)).catch(e=>console.error('Firebase write error:',e));
 }
 function extractFiles(db){
   const files = {};
@@ -1100,6 +1155,7 @@ function extractFiles(db){
   return files;
 }
 async function mergeFiles(db){
+  normalizarDB(db);
   // Load files from Firebase (separate path)
   try{
     const snap = await fbFilesRef.once('value');
@@ -1163,7 +1219,7 @@ async function _cargarDesdeFirebase(){
         seed.clientOCs = data.clientOCs || [];
         seed.notifEmails = data.notifEmails || seed.notifEmails;
       }
-      await fbRef.set(seed);
+      await fbRef.set(paraGuardar(seed));
       DB = seed;
     } else {
       DB = normalizeDB(data);
@@ -1640,6 +1696,7 @@ function goTo(view){
   if(view==='portal') renderPortal();
 }
 function renderAll(){
+  normalizarDB(DB);
   renderInicio(); renderClientsList(); renderQuotesList(); renderPOList(); renderArchivos(); renderRespaldos();
   renderPortal();
   if(currentRole==='admin'){ renderComparar(); }
