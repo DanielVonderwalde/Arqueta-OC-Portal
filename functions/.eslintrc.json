@@ -1,0 +1,27 @@
+{
+  "root": true,
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "script"
+  },
+  "extends": "eslint:recommended",
+  "rules": {
+    "no-console": "warn",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "eqeqeq": ["error", "smart"],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "strict": ["error", "global"]
+  },
+  "overrides": [
+    {
+      "files": ["test/**/*.js"],
+      "env": { "node": true }
+    }
+  ]
+}
