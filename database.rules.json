@@ -1,0 +1,25 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "arqueta_db": {
+      "clients": { ".indexOn": ["portal_email", "portal_active"] },
+      "quotes": { ".indexOn": ["client_id", "status", "date"] },
+      "clientOCs": { ".indexOn": ["client_id", "status", "date_submitted"] },
+      "purchaseOrders": { ".indexOn": ["quote_id", "client_id", "status"] }
+    },
+
+    "documents": {
+      ".indexOn": ["quote_id", "client_oc_id", "client_id"]
+    },
+
+    "private": {
+      "credentials": {
+        "users": { ".indexOn": ["user", "role"] },
+        "clients": { ".indexOn": ["email_lower"] }
+      },
+      "sessions": { ".indexOn": ["sub"] }
+    }
+  }
+}
