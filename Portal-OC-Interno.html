@@ -1129,9 +1129,24 @@ function normalizeDB(d){
 let DB = seedData();
 const DATA_VERSION = 3;
 let firebaseReady = false;
+/* Fase 3 — la base ya no se descarga al abrir la pagina.
+   Antes: initFirebase() corria en DOMContentLoaded, asi que cualquier
+   visitante recibia arqueta_db entera (clientes, cotizaciones, costos y
+   margenes) sin haber escrito una sola contrasena.
+   Ahora: initFirebase() solo corre desde abrirSesionUI(), es decir, despues
+   de un login correcto, y se corta al cerrar sesion. */
+let firebaseIniciado = false;
+let firebasePromesa = null;
 
 // Initialize from Firebase — async
 async function initFirebase(){
+  if(firebaseIniciado) return;
+  if(firebasePromesa) return firebasePromesa;
+  firebasePromesa = _cargarDesdeFirebase();
+  try{ await firebasePromesa; firebaseIniciado = true; }
+  finally{ firebasePromesa = null; }
+}
+async function _cargarDesdeFirebase(){
   try{
     const snapshot = await fbRef.once('value');
     let data = snapshot.val();
@@ -1442,20 +1457,22 @@ return USERS.find(x => x.user === s.user && x.role === s.role) || null;
    es el usuario; si el token ya no vale, se cierra la sesion. */
 async function restaurarSesion(){
 const local = leerSesion();
-if(!api.activa()){ if(local) abrirSesionUI(local); return; }
+if(!api.activa()){ if(local) await abrirSesionUI(local); return; }
 if(!local || !api.leerTokens()){ sessionStorage.removeItem(SESION_KEY); api.borrarTokens(); return; }
 try{
 const d = await api.llamar('/auth/me');
 const found = {user:d.identity.id, role:d.identity.role, label:d.identity.label || d.identity.id};
 guardarSesion(found);
-abrirSesionUI(found);
+await abrirSesionUI(found);
 }catch(_){
 sessionStorage.removeItem(SESION_KEY);
 api.borrarTokens();
 }
 }
-function abrirSesionUI(found){
+async function abrirSesionUI(found){
 currentRole = found.role;
+/* Fase 3: la descarga de datos ocurre aqui, no antes del login. */
+await initFirebase();
 document.getElementById('login-error').style.display='none';
 document.getElementById('login-screen').style.display='none';
 document.getElementById('app').classList.add('active');
@@ -1475,7 +1492,7 @@ if(api.activa()){
 const identidad = await api.login('/auth/login', {user:u, password:p});
 const found = {user: identidad.id, role: identidad.role, label: identidad.label || identidad.id};
 guardarSesion(found);
-abrirSesionUI(found);
+await abrirSesionUI(found);
 autoRespaldo();
 return;
 }
@@ -1483,7 +1500,7 @@ const hash = await hashCredencial(u, p);
 const found = USERS.find(x => x.user === u && x.passHash === hash);
 if(found){
 guardarSesion(found);
-abrirSesionUI(found);
+await abrirSesionUI(found);
 autoRespaldo();
 } else {
 mostrarErrorLogin();
@@ -1516,6 +1533,13 @@ el.style.display = currentRole==='admin' ? '' : 'none';
 });
 }
 function handleLogout(){
+/* Fase 3: cerrar sesion tambien corta el listener en vivo y borra de
+   memoria lo que ya se habia descargado. */
+try{ fbRef.off(); }catch(_){}
+DB = seedData();
+firebaseIniciado = false;
+currentQuoteId = null;
+currentClientId = null;
 if(api.activa()) api.salir();
 sessionStorage.removeItem(SESION_KEY);
 sessionStorage.removeItem(SESION_LLAVE_VIEJA);
@@ -1533,7 +1557,7 @@ if(!leerSesion()){ showToast('Tu sesión expiró — vuelve a entrar'); handleLo
 window.addEventListener('DOMContentLoaded', async ()=>{
 document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{timeZone:TZ_MX, weekday:'long', year:'numeric', month:'long', day:'numeric'});
 sessionStorage.removeItem(SESION_LLAVE_VIEJA);
-await initFirebase();
+/* Fase 3: sin sesion valida no se consulta la base. */
 await restaurarSesion();
 });
 
