@@ -134,7 +134,7 @@ tr:last-child td{border-bottom:none;}
     </div>
     <div class="logout">
       <span class="who" id="who-client"></span>
-      <span id="build-stamp" style="font-size:10px;opacity:.55;margin-left:10px;" title="Versión del portal">v2026.07.20-d</span>
+      <span id="build-stamp" style="font-size:10px;opacity:.55;margin-left:10px;" title="Versión del portal">v2026.07.31-seg</span>
       <button class="btn btn-ghost" style="color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
     </div>
   </div>
@@ -218,18 +218,9 @@ async function guardarMiOC(oc){
 }
 
 function saveData(){ console.warn('El portal del cliente ya no reescribe la base completa'); }
-async function mergePortalFiles(db){
-  try{
-    const snap = await fbFilesRef.once('value');
-    const files = snap.val() || {};
-    (db.quotes||[]).forEach(q=>{
-      const pf = files['pdf_'+q.id]; if(pf && (!q.pdfData||q.pdfData==='[cloud]')){ q.pdfName=pf.name; q.pdfData=pf.data; }
-    });
-    (db.clientOCs||[]).forEach(o=>{
-      const of2 = files['oc_'+o.id]; if(of2 && (!o.fileData||o.fileData==='[cloud]')){ o.fileName=of2.name; o.fileData=of2.data; }
-    });
-  }catch(e){ console.error('File load error:',e); }
-}
+/* mergePortalFiles se eliminó a propósito: descargaba TODOS los archivos de
+TODOS los clientes al abrir la página. Los PDFs ahora se piden de uno en uno
+y solo cuando el usuario los abre (ver downloadPortalFile / downloadOCFile). */
 function normalizeDB(d){
   // Firebase converts arrays to objects — convert them back
   const toArr = v => { if(!v) return []; if(Array.isArray(v)) return v; return Object.values(v); };
@@ -300,33 +291,161 @@ function showToast(msg){
   window._tt=setTimeout(()=>t.classList.remove('show'),2400);
 }
 
-let firebaseLoaded = false;
-function handleLogin(){
-  if(!firebaseLoaded){
-    document.getElementById('login-error').textContent = 'Cargando datos, espera un momento...';
-    document.getElementById('login-error').style.display='block';
-    return;
-  }
-  const email = document.getElementById('login-email').value.trim().toLowerCase();
-  const pass = document.getElementById('login-pass').value;
-  console.log('Login attempt:', email, '| Clients in DB:', DB.clients.length);
-  console.log('Active clients:', DB.clients.filter(c=>c.portal_active).map(c=>c.portal_email));
-  const client = DB.clients.find(c => c.portal_active && c.portal_email && c.portal_email.toLowerCase()===email && c.portal_password===pass);
-  if(client){
-    sessionStorage.setItem('arqueta_portal_client', client.id);
-    currentClient = client;
-    showPortal(client);
-  } else {
-    document.getElementById('login-error').textContent = 'Correo o contraseña incorrectos, o tu acceso está inactivo.';
-    document.getElementById('login-error').style.display='block';
-  }
+/* ===================== ACCESO AL PORTAL =====================
+Antes: la página descargaba TODA la base (clientes, cotizaciones, costos y
+órdenes de todos los clientes) ANTES del login, y comparaba la contraseña en
+texto plano. Cualquier visitante podía leerlo desde la consola.
+Ahora:
+- Antes del login solo se consulta el registro del correo que se escribió, y
+  únicamente para validar la contraseña.
+- El resto de los datos se pide después de un login correcto, ya filtrado por
+  client_id. Del desglose de costos solo se conserva el escalón y el precio
+  de venta: sustrato, MOD, transporte y margen ya no viajan al cliente.
+- La contraseña se compara como hash SHA-256. Las cuentas que todavía tienen
+  contraseña en claro siguen funcionando hasta que el admin las vuelva a
+  guardar desde el portal interno (ahí se migran a hash).
+Pendiente: mientras el navegador hable directo con Firebase, esto sigue
+dependiendo de las reglas de la base. La validación de verdad va en la Cloud
+Function de login. */
+const SESION_KEY = 'arqueta_portal_sesion';
+const SESION_HORAS = 8;
+
+async function sha256Hex(texto){
+const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(texto)));
+return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+
+async function passwordCorrecta(c, pass){
+if(!c || !pass) return false;
+if(c.portal_password_hash) return c.portal_password_hash === await sha256Hex(pass);
+if(c.portal_password) return c.portal_password === pass; /* cuenta aún sin migrar */
+return false;
+}
+
+/* Solo trae el registro del correo escrito, no la lista completa de clientes. */
+async function buscarClientePorCorreo(email){
+const crudo = document.getElementById('login-email').value.trim();
+for(const valor of [email, crudo]){
+if(!valor) continue;
+const snap = await fbRef.child('clients').orderByChild('portal_email').equalTo(valor).once('value');
+const c = Object.values(snap.val() || {}).filter(Boolean).find(x=>x.portal_active);
+if(c) return c;
+}
+return null;
+}
+async function buscarClientePorId(id){
+const snap = await fbRef.child('clients').orderByChild('id').equalTo(id).once('value');
+return Object.values(snap.val() || {}).filter(Boolean).find(x=>x.portal_active) || null;
+}
+
+const aArreglo = v => !v ? [] : (Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean));
+
+/* Datos del cliente, ya recortados. Nunca se descarga la base completa. */
+async function cargarDatosDelCliente(client){
+const [snapQ, snapOC, snapMails] = await Promise.all([
+fbRef.child('quotes').orderByChild('client_id').equalTo(client.id).once('value'),
+fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id).once('value'),
+fbRef.child('notifEmails').once('value')
+]);
+const visibles = aArreglo(snapQ.val()).filter(esVisibleParaCliente);
+const tiers = [];
+for(const q of visibles){
+const snapT = await fbRef.child('costBreakdown').orderByChild('quote_id').equalTo(q.id).once('value');
+aArreglo(snapT.val()).forEach(r=>tiers.push({quote_id:r.quote_id, quantity_tier:r.quantity_tier, valor_venta_total:r.valor_venta_total}));
+}
+DB = {
+clients: [client],
+quotes: visibles,
+costBreakdown: tiers,
+purchaseOrders: [],
+clientOCs: aArreglo(snapOC.val()),
+notifEmails: aArreglo(snapMails.val())
+};
+DB.clientOCs.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
+}
+
+/* Token aleatorio con caducidad, generado solo tras un login correcto. */
+function guardarSesion(client){
+sessionStorage.setItem(SESION_KEY, JSON.stringify({
+client_id: client.id,
+token: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)),
+exp: Date.now() + SESION_HORAS*3600*1000
+}));
+}
+
+/* El listener en vivo ya no escucha toda la base, solo las OCs de este cliente. */
+let _ocListener = null;
+function escucharMisOCs(client){
+dejarDeEscuchar();
+_ocListener = fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id);
+_ocListener.on('value', snap=>{
+if(!currentClient) return;
+DB.clientOCs = aArreglo(snap.val());
+DB.clientOCs.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
+renderMyOCs(currentClient);
+});
+}
+function dejarDeEscuchar(){
+if(_ocListener){ try{ _ocListener.off(); }catch(_){} _ocListener = null; }
+}
+
+async function entrarComo(client){
+currentClient = client;
+await cargarDatosDelCliente(client);
+showPortal(client);
+escucharMisOCs(client);
+}
+
+async function handleLogin(){
+const email = document.getElementById('login-email').value.trim().toLowerCase();
+const pass = document.getElementById('login-pass').value;
+const err = document.getElementById('login-error');
+const btn = document.querySelector('#login-screen .btn-primary');
+if(btn){ btn.disabled = true; btn.textContent = 'Entrando...'; }
+try{
+const client = await buscarClientePorCorreo(email);
+if(client && await passwordCorrecta(client, pass)){
+err.style.display = 'none';
+guardarSesion(client);
+await entrarComo(client);
+} else {
+err.textContent = 'Correo o contraseña incorrectos, o tu acceso está inactivo.';
+err.style.display = 'block';
+}
+}catch(e){
+console.error('Login error');
+err.textContent = 'No se pudo validar el acceso. Intenta de nuevo en un momento.';
+err.style.display = 'block';
+}finally{
+if(btn){ btn.disabled = false; btn.textContent = 'Entrar'; }
+document.getElementById('login-pass').value = '';
+}
+}
+
 function handleLogout(){
-  sessionStorage.removeItem('arqueta_portal_client');
-  currentClient = null;
-  document.getElementById('portal').classList.remove('active');
-  document.getElementById('login-screen').style.display='flex';
-  document.getElementById('login-email').value=''; document.getElementById('login-pass').value='';
+sessionStorage.removeItem(SESION_KEY);
+sessionStorage.removeItem('arqueta_portal_client');
+dejarDeEscuchar();
+currentClient = null;
+DB = {clients:[], quotes:[], costBreakdown:[], purchaseOrders:[], clientOCs:[], notifEmails:[]};
+document.getElementById('portal').classList.remove('active');
+document.getElementById('login-screen').style.display='flex';
+document.getElementById('login-email').value=''; document.getElementById('login-pass').value='';
+}
+
+async function restaurarSesion(){
+let s = null;
+try{ s = JSON.parse(sessionStorage.getItem(SESION_KEY) || 'null'); }catch(_){ s = null; }
+sessionStorage.removeItem('arqueta_portal_client');
+if(!s || !s.client_id || !s.token || !s.exp || Date.now() > s.exp){
+sessionStorage.removeItem(SESION_KEY);
+return;
+}
+try{
+const client = await buscarClientePorId(s.client_id);
+if(client) await entrarComo(client);
+else sessionStorage.removeItem(SESION_KEY);
+}catch(e){ console.error('No se pudo restaurar la sesión'); }
 }
 document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
 
@@ -1082,39 +1201,8 @@ async function triggerDownload(data, fileName){
   }
 }
 
-window.addEventListener('DOMContentLoaded', async ()=>{
-  try{
-    const snapshot = await fbRef.once('value');
-    const data = snapshot.val();
-    if(data){
-      DB = normalizeDB(data);
-      if(!DB.clientOCs) DB.clientOCs = [];
-      if(!DB.notifEmails) DB.notifEmails = [];
-      console.log('Firebase loaded, clients:', DB.clients.length);
-      await mergePortalFiles(DB);
-      firebaseLoaded = true;
-    }
-  }catch(e){ console.error('Firebase load error:',e); firebaseLoaded = true; }
-
-  const savedId = sessionStorage.getItem('arqueta_portal_client');
-  if(savedId){
-    const client = DB.clients.find(c=>c.id===savedId && c.portal_active);
-    if(client){ currentClient=client; showPortal(client); }
-  }
-
-  // Real-time listener — see status changes instantly
-  fbRef.on('value', snap=>{
-    const d = snap.val();
-    if(d){
-      DB = normalizeDB(d);
-      if(!DB.clientOCs) DB.clientOCs = [];
-      if(!DB.notifEmails) DB.notifEmails = [];
-      if(currentClient){
-        currentClient = DB.clients.find(c=>c.id===currentClient.id);
-        if(currentClient) renderMyOCs(currentClient);
-      }
-    }
-  });
+window.addEventListener('DOMContentLoaded', ()=>{
+restaurarSesion();
 });
 </script>
 </body>
