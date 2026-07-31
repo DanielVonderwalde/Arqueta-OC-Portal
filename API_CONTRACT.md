@@ -253,3 +253,76 @@ La base de datos nunca guarda el contenido de un archivo.
    A partir de aqui el navegador ya no habla con Firebase.
 6. Rollback: volver a database.rules.transitional.json y revertir el commit
    del frontend. La API puede quedar desplegada sin afectar nada.
+
+## 7. Estado de la fase 3
+
+Fecha de corte: 31 de julio de 2026.
+
+### 7.1 Lo que ya quedo
+
+**Portal-OC-Interno.html** ya no descarga la base antes del login. `initFirebase()`
+se llamaba en `DOMContentLoaded`, de modo que cualquier visitante recibia
+`arqueta_db` completa (clientes, cotizaciones, costos y margenes) sin escribir
+una sola contrasena. Ahora se llama desde `abrirSesionUI()`, es idempotente, y
+al cerrar sesion se corta el listener en vivo y se limpia la memoria. Verificado
+en el sitio publicado: cero peticiones a la base al abrir la pagina.
+
+**Portal-Clientes.html** tiene un objeto `datos` que decide de donde salen los
+datos: de la API si `API_BASE` esta configurado, o de Firebase como hasta hoy.
+Pasan por ahi la carga de cotizaciones, la escalera de precios, las ordenes de
+compra, el alta de una OC y la actualizacion en vivo (listener con Firebase,
+sondeo cada 60 s con la API).
+
+### 7.2 Tres defectos corregidos en la capa de API
+
+Se encontraron revisando el modelo real contra lo que se habia escrito en la
+fase 1. Ninguno era visible hasta intentar usar la API de verdad.
+
+**a) La llave de almacenamiento no es el id.** La base guarda `clients`,
+`quotes`, `costBreakdown` y `clientOCs` como arreglos, y Firebase convierte los
+arreglos en objetos con llaves numericas. `db.patch(path, id, ...)` escribia en
+`<path>/<id>`, asi que en vez de actualizar la fila habria creado un registro
+nuevo al lado, duplicando el dato en silencio. Se agrego `db.keyOf()` /
+`db.refOf()`, que resuelven la llave real y funcionan con el modelo actual y con
+el modelo destino indexado por id.
+
+**b) El esquema de OC no correspondia a la aplicacion.** Se validaban lineas
+`{ quote_id, descripcion, cantidad }`; los dos portales mandan
+`{ codigo, product, quantity, unit_price, ... }`. Cualquier OC enviada habria
+sido rechazada con 400. Ademas el semaforo `alerta_max` ahora lo calcula el
+servidor, no el navegador.
+
+**c) El desglose de costos no correspondia a la aplicacion.** Se validaban
+conceptos sueltos `{ concepto, unidad, cantidad, costo_unitario }`; el modelo
+real es un renglon por volumen (`quantity_tier`, `sustrato`, `acabado`,
+`materiales`, `mod`, `ee`, `extras`, `transporte`, `valor_venta_total`,
+`margen`). Se corrigio el esquema y los dos endpoints.
+
+Se agrego tambien `GET /v1/quotes/:id/price-tiers`: el cliente necesita la
+escalera de precios para armar su OC, pero no puede llamar a `/cost-breakdown`,
+que es de admin. Devuelve unicamente volumen y precio de venta.
+
+### 7.3 Pendientes con decision del usuario
+
+**Borrado.** El panel interno hoy borra de verdad clientes, cotizaciones,
+ordenes del cliente y ordenes de compra (`deleteCurrentClient`,
+`deleteCurrentQuote`, `deleteClientOC`, `deletePO`). La API se diseno sin
+borrado: solo desactiva, para conservar el historial. Hay que elegir antes de
+migrar las escrituras del panel interno:
+
+1. Agregar endpoints de borrado que repliquen lo de hoy.
+2. Cambiar borrar por desactivar. Conserva el historial, pero cambia lo que ve
+   el administrador.
+3. Dejar el borrado solo contra Firebase.
+
+**Migracion de llaves.** Mientras la base siga guardando arreglos, cada lectura
+por id necesita el indice `id` que ya se agrego a `database.rules.json`. Pasar
+la base a mapas indexados por id es una migracion sobre datos de produccion:
+requiere respaldo previo y autorizacion explicita. No se ha corrido.
+
+**Correos de aviso.** `notifEmails` se lee hoy desde el navegador. Con la API
+activa la base queda cerrada, asi que el aviso de OC nueva sale a la direccion
+por omision hasta que el envio se mueva al servidor en la fase 4.
+
+**Archivos adjuntos.** Siguen subiendose directo a `arqueta_files`, tambien con
+la API activa. Se cambian por URL firmada en la fase 4 (`/v1/documents`).
