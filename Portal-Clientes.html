@@ -281,7 +281,10 @@ function uid(p){ return p+'-'+Math.random().toString(36).slice(2,9); }
 const statusLabel = {vigente:'Vigente', borrador:'En preparación', vencida:'Vencida'};
 /* Las cotizaciones en borrador son internas: nunca se muestran al cliente. */
 const PORTAL_VISIBLE_STATUS = ['vigente','vencida'];
-const esVisibleParaCliente = q => PORTAL_VISIBLE_STATUS.includes(String(q.status||'').toLowerCase());
+/* Un registro desactivado en el panel interno deja de existir para el cliente. */
+function estaActivo(r){ return !(r && r.activo === false); }
+const esVisibleParaClienteBase = q => PORTAL_VISIBLE_STATUS.includes(String(q.status||'').toLowerCase());
+const esVisibleParaCliente = (r)=> estaActivo(r) && esVisibleParaClienteBase(r);
 
 function showToast(msg){
   const t=document.getElementById('toast');
@@ -421,11 +424,14 @@ const datos = {
         const snap = await fbRef.child('costBreakdown').orderByChild('quote_id').equalTo(q.id).once('value');
         tiers = aArreglo(snap.val());
       }
-      tiers.forEach(r=>filas.push({
-        quote_id: q.id,
-        quantity_tier: r.quantity_tier,
-        valor_venta_total: r.valor_venta_total
-      }));
+      tiers.forEach(r=>{
+        if(!estaActivo(r)) return;
+        filas.push({
+          quote_id: q.id,
+          quantity_tier: r.quantity_tier,
+          valor_venta_total: r.valor_venta_total
+        });
+      });
     }
     return filas;
   },
@@ -435,7 +441,7 @@ const datos = {
       ? await api.listaCompleta('/orders/client', {client_id: client.id})
       : aArreglo((await fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id).once('value')).val());
     lista.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
-    return lista;
+    return lista.filter(estaActivo);
   },
 
   /* Correos de aviso. Con la API activa la base queda cerrada al navegador,
