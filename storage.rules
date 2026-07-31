@@ -1,0 +1,16 @@
+rules_version = '2';
+
+// Almacenamiento de archivos (PDFs, Excel).
+//
+// Nadie accede al bucket directamente desde el navegador. Todas las subidas
+// y descargas pasan por URLs firmadas de corta vida que emite la API
+// (/v1/documents). El SDK de administrador que corre dentro de Cloud
+// Functions ignora estas reglas, asi que negar todo aqui NO rompe la API.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
