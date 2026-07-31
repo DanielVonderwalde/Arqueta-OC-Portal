@@ -32,6 +32,26 @@ const listQuery = z.object({
   cursor: z.string().max(120).optional()
 }).strict();
 
+/* Forma real de un renglon de orden de compra, tal como lo capturan los dos
+   portales. Antes esta validacion pedia { quote_id, descripcion, cantidad },
+   que no corresponde a ningun campo que exista en la aplicacion: cualquier OC
+   enviada desde el portal habria sido rechazada con 400.
+
+   quote_id es opcional a proposito: el cliente puede pedir un producto que
+   todavia no tiene cotizacion cargada, y el panel interno captura OCs a mano.
+   Cuando si viene, el servidor verifica que esa cotizacion sea de su empresa. */
+const lineSchema = z.object({
+  codigo: z.string().trim().max(80).optional(),
+  product: z.string().trim().min(1).max(200),
+  quantity: z.coerce.number().min(0),
+  unit_price: z.coerce.number().min(0),
+  precio_manual: z.boolean().optional(),
+  quote_id: z.string().max(80).optional(),
+  quote_number: z.string().max(60).optional(),
+  alerta: z.enum(['ok', 'warn', 'bad']).optional(),
+  avisos: z.array(z.string().max(300)).max(20).optional()
+}).strict();
+
 const clientOcSchema = z.object({
   client_id: z.string().max(80).optional(),
   oc_number: z.string().trim().min(1).max(60),
@@ -39,11 +59,7 @@ const clientOcSchema = z.object({
   fecha_deseada: z.string().max(20).optional(),
   urgente: z.boolean().optional(),
   document_id: z.string().max(120).optional(),
-  lines: z.array(z.object({
-    quote_id: z.string().max(80),
-    descripcion: z.string().max(200).optional(),
-    cantidad: z.coerce.number().min(0)
-  })).min(1).max(200)
+  lines: z.array(lineSchema).min(1).max(200)
 }).strict();
 
 const statusSchema = z.object({
@@ -115,15 +131,22 @@ router.post('/client', rateLimit('write'), validate({ body: clientOcSchema }), a
     if (!clientId) throw errors.badRequest('Falta client_id.');
     resolveClientScope(req, clientId);
 
-    /* Cada linea debe apuntar a una cotizacion que sea de ese mismo cliente:
-       asi nadie puede ordenar contra la cotizacion de otra empresa. */
+    /* Si la linea trae cotizacion, tiene que ser de esta misma empresa: asi
+       nadie puede ordenar contra la cotizacion de otro cliente. */
     for (const line of body.lines) {
+      if (!line.quote_id) continue;
       const quote = await db.getById(db.PATHS.quotes, line.quote_id);
       if (!quote) throw errors.badRequest('La cotizacion ' + line.quote_id + ' no existe.');
       if (String(quote.client_id) !== String(clientId)) throw errors.forbidden('Una de las cotizaciones no pertenece a tu empresa.');
     }
 
+    /* El semaforo de la OC lo calcula el servidor a partir de las lineas.
+       Si llegara ya resuelto desde el navegador se podria maquillar. */
+    const niveles = body.lines.map(function (l) { return l.alerta || 'ok'; });
+    const alertaMax = niveles.indexOf('bad') >= 0 ? 'bad' : (niveles.indexOf('warn') >= 0 ? 'warn' : 'ok');
+
     const id = db.newId('oc');
+    const ahora = db.now();
     const row = {
       id: id,
       client_id: String(clientId),
@@ -133,8 +156,11 @@ router.post('/client', rateLimit('write'), validate({ body: clientOcSchema }), a
       urgente: body.urgente === true,
       document_id: body.document_id || null,
       lines: body.lines,
+      alerta_max: alertaMax,
       status: 'pendiente',
-      date_submitted: db.now(),
+      /* Solo la fecha, igual que las OCs que ya existen en la base. */
+      date_submitted: ahora.slice(0, 10),
+      createdAt: ahora,
       createdBy: req.auth.sub
     };
     await db.put(db.PATHS.clientOCs, id, row);
