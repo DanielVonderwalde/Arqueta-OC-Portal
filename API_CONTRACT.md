@@ -421,3 +421,62 @@ firebase deploy --only database
 ```
 
 Mientras tanto los indices son solo una intencion escrita en el repo.
+
+
+## 9. Desactivar en lugar de borrar
+
+### 9.1 La marca
+
+Un registro desactivado lleva `activo: false`, `deactivatedAt` (ISO) y `deactivatedBy`.
+Nunca se elimina una fila. En clientes se pone ademas `portal_active: false` para cortar el
+acceso al portal.
+
+### 9.2 Como se oculta sin tocar el resto del codigo
+
+El portal interno tenia unas quince lecturas de `DB.clients`, `DB.quotes`, etc. repartidas
+por todo el archivo. En vez de filtrar en cada una, el corte se hace en un solo punto:
+
+- `normalizarDB` aparta los desactivados en `<coleccion>Todos` y deja en `<coleccion>` solo
+  lo vigente. Todo el codigo existente sigue viendo unicamente lo activo, sin cambios.
+- `paraGuardar` los reincorpora antes de escribir, asi que nunca se pierden, y no escribe
+  las claves `*Todos` en Firebase: son solo de memoria.
+- `reincorporar` devuelve el registro a la coleccion activa al reactivarlo. Hace falta
+  porque la sombra solo guarda lo desactivado: sin este paso, reactivar borraba el registro.
+
+### 9.3 Cascada
+
+Desactivar un cliente arrastra sus cotizaciones, las filas de costo de esas cotizaciones y
+sus ordenes. Si no, quedarian cotizaciones activas apuntando a un cliente invisible.
+Por la misma razon no se puede reactivar una cotizacion mientras su cliente siga desactivado.
+La reactivacion no es en cascada: se hace pieza por pieza, a proposito.
+
+### 9.4 Pantalla "Desactivados"
+
+Nueva entrada en el menu lateral del portal interno (solo admin). Lista lo desactivado por
+tipo, con quien lo desactivo y cuando, y un boton para reactivar. Se construye con el DOM
+(`createElement` + `textContent`), sin `innerHTML` con datos, para no abrir un punto de
+inyeccion nuevo de los que senalaba la auditoria del punto 1.
+
+### 9.5 El portal del cliente
+
+Lo desactivado en el panel interno desaparece tambien para el cliente. `esVisibleParaCliente`
+conserva su logica original intacta y se envuelve con el filtro de `activo`; las ordenes
+desactivadas se filtran en `ocsDe` y las filas de costo de cotizaciones desactivadas no
+entran en la escalera de precios.
+
+### 9.6 La API
+
+`POST /v1/clients/:id/deactivate` escribe la misma marca que los portales y aplica la misma
+cascada con updates multi-ruta. Sigue sin haber ningun endpoint DELETE.
+
+**Pendiente:** faltan los endpoints equivalentes para cotizaciones y ordenes
+(`POST /v1/quotes/:id/deactivate` y `POST /v1/orders/client/:id/deactivate`). Hoy esas dos
+desactivaciones solo existen en el navegador. Hay que agregarlas antes de la fase 5, cuando
+la base quede cerrada y la API sea la unica que escribe.
+
+### 9.7 Verificacion
+
+Probado contra los datos reales en memoria, sin escribir en produccion: desactivar un cliente
+saco 1 cliente, 3 cotizaciones, 1 orden y 16 filas de costo de las vistas activas, mientras
+que el guardado simulado seguia conservando los 30 clientes, 12 cotizaciones y 54 filas.
+Reactivar devuelve el registro a su lugar. La base quedo intacta: 0 registros desactivados.
