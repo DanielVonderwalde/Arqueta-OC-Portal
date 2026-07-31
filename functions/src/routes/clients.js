@@ -174,7 +174,34 @@ router.post('/:id/deactivate', requireAdmin, rateLimit('write'), async function 
     const client = await db.getById(db.PATHS.clients, id);
     if (!client) throw errors.notFound('El cliente');
 
-    await (await db.refOf(db.PATHS.clients, id)).update({ portal_active: false, deactivatedAt: db.now(), deactivatedBy: req.auth.sub });
+    /* activo:false es la marca que leen los dos portales; portal_active corta ademas el acceso. */
+    const marca = { activo: false, portal_active: false, deactivatedAt: db.now(), deactivatedBy: req.auth.sub };
+    await (await db.refOf(db.PATHS.clients, id)).update(marca);
+
+    /* Se arrastra a lo que cuelga del cliente, para no dejar referencias colgando. */
+    const snapQuotes = await db.ref(db.PATHS.quotes).orderByChild('client_id').equalTo(id).once('value');
+    const quotes = snapQuotes.val() || {};
+    const cambiosQuotes = {};
+    const cambiosCostos = {};
+    for (const clave of Object.keys(quotes)) {
+      cambiosQuotes[clave + '/activo'] = false;
+      cambiosQuotes[clave + '/deactivatedAt'] = marca.deactivatedAt;
+      cambiosQuotes[clave + '/deactivatedBy'] = marca.deactivatedBy;
+      const snapCostos = await db.ref(db.PATHS.costBreakdown).orderByChild('quote_id').equalTo(quotes[clave].id).once('value');
+      for (const clvCosto of Object.keys(snapCostos.val() || {})) {
+        cambiosCostos[clvCosto + '/activo'] = false;
+      }
+    }
+    const snapOcs = await db.ref(db.PATHS.clientOCs).orderByChild('client_id').equalTo(id).once('value');
+    const cambiosOcs = {};
+    for (const clave of Object.keys(snapOcs.val() || {})) {
+      cambiosOcs[clave + '/activo'] = false;
+      cambiosOcs[clave + '/deactivatedAt'] = marca.deactivatedAt;
+      cambiosOcs[clave + '/deactivatedBy'] = marca.deactivatedBy;
+    }
+    if (Object.keys(cambiosQuotes).length) await db.ref(db.PATHS.quotes).update(cambiosQuotes);
+    if (Object.keys(cambiosCostos).length) await db.ref(db.PATHS.costBreakdown).update(cambiosCostos);
+    if (Object.keys(cambiosOcs).length) await db.ref(db.PATHS.clientOCs).update(cambiosOcs);
     await db.child(db.PATHS.credClients, id).update({ active: false });
     const closed = await cred.revokeAllSessionsOf('cliente:' + id);
 
