@@ -156,7 +156,7 @@ router.put('/:id/portal-access', requireAdmin, rateLimit('write'), validate({ bo
       update.legacyHash = null;
     }
     await db.child(db.PATHS.credClients, id).update(update);
-    await db.child(db.PATHS.clients, id).update({ portal_email: body.portal_email, portal_active: body.active !== false });
+    await (await db.refOf(db.PATHS.clients, id)).update({ portal_email: body.portal_email, portal_active: body.active !== false });
 
     if (body.password) await cred.revokeAllSessionsOf('cliente:' + id);
 
@@ -174,7 +174,7 @@ router.post('/:id/deactivate', requireAdmin, rateLimit('write'), async function 
     const client = await db.getById(db.PATHS.clients, id);
     if (!client) throw errors.notFound('El cliente');
 
-    await db.child(db.PATHS.clients, id).update({ portal_active: false, deactivatedAt: db.now(), deactivatedBy: req.auth.sub });
+    await (await db.refOf(db.PATHS.clients, id)).update({ portal_active: false, deactivatedAt: db.now(), deactivatedBy: req.auth.sub });
     await db.child(db.PATHS.credClients, id).update({ active: false });
     const closed = await cred.revokeAllSessionsOf('cliente:' + id);
 
