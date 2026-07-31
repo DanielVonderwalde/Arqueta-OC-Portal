@@ -1349,6 +1349,71 @@ usuario sigue existiendo.
 Ojo: esto corre en el navegador, así que sigue siendo una barrera débil.
 La sesión de verdad la tiene que emitir y validar la Cloud Function de login.
 ========================================================= */
+/* =========================================================
+   CAPA DE API  (fase 2 de la migracion)
+   Contrato completo en API_CONTRACT.md; despliegue en functions/README.md.
+
+   API_BASE vacio = la API esta apagada y el login sigue funcionando
+   igual que hoy, contra la lista USERS de este archivo. En cuanto la
+   Cloud Function este desplegada y se haya corrido el bootstrap, se pega
+   aqui la URL y el login pasa a validarse en el servidor.
+
+   const API_BASE = "https://us-central1-arqueta-portal.cloudfunctions.net/api";
+   ========================================================= */
+const API_BASE = '';
+const API_TOKENS_KEY = 'arqueta_admin_api_tokens';
+
+const api = {
+activa(){ return typeof API_BASE === 'string' && API_BASE.trim().length > 0; },
+leerTokens(){ try{ return JSON.parse(sessionStorage.getItem(API_TOKENS_KEY) || 'null'); }catch(_){ return null; } },
+guardarTokens(t){ if(t) sessionStorage.setItem(API_TOKENS_KEY, JSON.stringify(t)); },
+borrarTokens(){ sessionStorage.removeItem(API_TOKENS_KEY); },
+async crudo(ruta, opciones, conToken){
+const cfg = Object.assign({method:'GET'}, opciones || {});
+cfg.headers = Object.assign({'Content-Type':'application/json'}, cfg.headers || {});
+if(cfg.body && typeof cfg.body !== 'string') cfg.body = JSON.stringify(cfg.body);
+const t = this.leerTokens();
+if(conToken !== false && t && t.accessToken) cfg.headers.Authorization = 'Bearer ' + t.accessToken;
+const r = await fetch(API_BASE.replace(/\/+$/, '') + '/v1' + ruta, cfg);
+let cuerpo = null;
+try{ cuerpo = await r.json(); }catch(_){ cuerpo = null; }
+if(!r.ok){
+const e = new Error((cuerpo && cuerpo.error && cuerpo.error.message) || ('Error ' + r.status));
+e.codigo = (cuerpo && cuerpo.error) ? cuerpo.error.code : ('http_' + r.status);
+e.status = r.status;
+throw e;
+}
+return cuerpo ? cuerpo.data : null;
+},
+/* Si el access token vencio, lo renueva una vez y reintenta. */
+async llamar(ruta, opciones){
+try{ return await this.crudo(ruta, opciones, true); }
+catch(e){
+if(e.status !== 401) throw e;
+if(!(await this.renovar())) throw e;
+return this.crudo(ruta, opciones, true);
+}
+},
+async renovar(){
+const t = this.leerTokens();
+if(!t || !t.refreshToken) return false;
+try{
+const d = await this.crudo('/auth/refresh', {method:'POST', body:{refreshToken:t.refreshToken}}, false);
+this.guardarTokens(d.tokens);
+return true;
+}catch(_){ this.borrarTokens(); return false; }
+},
+async login(ruta, credenciales){
+const d = await this.crudo(ruta, {method:'POST', body:credenciales}, false);
+this.guardarTokens(d.tokens);
+return d.identity;
+},
+async salir(){
+try{ await this.llamar('/auth/logout', {method:'POST'}); }catch(_){}
+this.borrarTokens();
+}
+};
+
 const SESION_KEY = 'arqueta_admin_sesion';
 const SESION_LLAVE_VIEJA = 'arqueta_admin_session';
 const SESION_HORAS = 8;
@@ -1359,6 +1424,7 @@ sessionStorage.setItem(SESION_KEY, JSON.stringify({
 token: (crypto.randomUUID ? crypto.randomUUID() : ''),
 user: found.user,
 role: found.role,
+label: found.label || found.user,
 exp: Date.now() + SESION_HORAS*3600*1000
 }));
 }
@@ -1367,7 +1433,26 @@ let s = null;
 try{ s = JSON.parse(sessionStorage.getItem(SESION_KEY) || 'null'); }catch(_){ s = null; }
 if(!s || typeof s.token !== 'string' || !RE_UUID.test(s.token)) return null;
 if(!s.exp || Date.now() > s.exp) return null;
+/* Con la API activa el rol lo respalda el token del servidor, que se
+   revalida en cada llamada. Sin API se exige que el usuario siga en USERS. */
+if(api.activa()) return {user:s.user, role:s.role, label:s.label || s.user};
 return USERS.find(x => x.user === s.user && x.role === s.role) || null;
+}
+/* Al recargar la pagina: con la API activa se le pregunta al servidor quien
+   es el usuario; si el token ya no vale, se cierra la sesion. */
+async function restaurarSesion(){
+const local = leerSesion();
+if(!api.activa()){ if(local) abrirSesionUI(local); return; }
+if(!local || !api.leerTokens()){ sessionStorage.removeItem(SESION_KEY); api.borrarTokens(); return; }
+try{
+const d = await api.llamar('/auth/me');
+const found = {user:d.identity.id, role:d.identity.role, label:d.identity.label || d.identity.id};
+guardarSesion(found);
+abrirSesionUI(found);
+}catch(_){
+sessionStorage.removeItem(SESION_KEY);
+api.borrarTokens();
+}
 }
 function abrirSesionUI(found){
 currentRole = found.role;
@@ -1381,7 +1466,19 @@ applyRoleVisibility();
 async function handleLogin(){
 const u = document.getElementById('login-user').value.trim().toLowerCase();
 const p = document.getElementById('login-pass').value;
+const btn = document.querySelector('#login-screen .btn-primary');
+if(btn) btn.disabled = true;
 try{
+if(api.activa()){
+/* Fase 2: la contrasena la valida el servidor. Este archivo ya no
+   compara hashes ni decide el rol por su cuenta. */
+const identidad = await api.login('/auth/login', {user:u, password:p});
+const found = {user: identidad.id, role: identidad.role, label: identidad.label || identidad.id};
+guardarSesion(found);
+abrirSesionUI(found);
+autoRespaldo();
+return;
+}
 const hash = await hashCredencial(u, p);
 const found = USERS.find(x => x.user === u && x.passHash === hash);
 if(found){
@@ -1389,13 +1486,20 @@ guardarSesion(found);
 abrirSesionUI(found);
 autoRespaldo();
 } else {
-document.getElementById('login-error').style.display='block';
+mostrarErrorLogin();
 }
 }catch(e){
-document.getElementById('login-error').style.display='block';
+mostrarErrorLogin(e && e.status === 429 ? 'Demasiados intentos. Espera unos minutos antes de volver a probar.' : null);
 }finally{
+if(btn) btn.disabled = false;
 document.getElementById('login-pass').value='';
 }
+}
+function mostrarErrorLogin(texto){
+const el = document.getElementById('login-error');
+if(!el) return;
+if(texto) el.textContent = texto;
+el.style.display='block';
 }
 function applyRoleVisibility(){
 document.querySelectorAll('.admin-only').forEach(el=>{
@@ -1412,6 +1516,7 @@ el.style.display = currentRole==='admin' ? '' : 'none';
 });
 }
 function handleLogout(){
+if(api.activa()) api.salir();
 sessionStorage.removeItem(SESION_KEY);
 sessionStorage.removeItem(SESION_LLAVE_VIEJA);
 document.getElementById('app').classList.remove('active');
@@ -1429,8 +1534,7 @@ window.addEventListener('DOMContentLoaded', async ()=>{
 document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{timeZone:TZ_MX, weekday:'long', year:'numeric', month:'long', day:'numeric'});
 sessionStorage.removeItem(SESION_LLAVE_VIEJA);
 await initFirebase();
-const found = leerSesion();
-if(found) abrirSesionUI(found);
+await restaurarSesion();
 });
 
 function setExportPeriod(days){
