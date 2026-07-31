@@ -65,22 +65,61 @@ function asList(value) {
   });
 }
 
-async function getById(path, id) {
-  const snap = await child(path, id).once('value');
+/* ---------------------------------------------------------------------------
+ * La llave de almacenamiento NO es el id del registro
+ *
+ * La base de produccion todavia guarda clients, quotes, costBreakdown y
+ * clientOCs como ARREGLOS. Firebase convierte los arreglos de JavaScript en
+ * objetos con llaves numericas ("0", "1", "2"...), asi que la llave real de
+ * cada fila no es su id. Escribir en <path>/<id> no actualizaria la fila:
+ * crearia un registro nuevo al lado y duplicaria el dato en silencio.
+ *
+ * keyOf() devuelve la llave real. Primero intenta el acceso directo (modelo
+ * destino, indexado por id) y si no existe busca por el campo id usando el
+ * indice .indexOn declarado en database.rules.json.
+ *
+ * Cuando se corra scripts/migrar-llaves.js la base entera queda indexada por
+ * id y el segundo camino deja de usarse solo. Este archivo no cambia.
+ * ------------------------------------------------------------------------- */
+async function keyOf(path, id) {
+  if (!id || /[.#$\[\]/]/.test(String(id))) throw errors.badRequest('Identificador invalido.');
+  const directo = await rtdb.ref(path + '/' + id).once('value');
+  if (directo.exists()) return String(id);
+  const snap = await rtdb.ref(path).orderByChild('id').equalTo(String(id)).once('value');
   const val = snap.val();
-  if (val) return Object.assign({ id: id }, val);
-  /* fallback modelo legado (arreglo): buscamos por campo id */
-  const all = asList((await ref(path).once('value')).val());
-  return all.find(function (r) { return String(r.id) === String(id); }) || null;
+  const llaves = val ? Object.keys(val) : [];
+  return llaves.length ? llaves[0] : null;
 }
 
+/** Referencia a la fila real. Lanza 404 si el registro no existe. */
+async function refOf(path, id) {
+  const key = await keyOf(path, id);
+  if (!key) throw errors.notFound('El registro');
+  return rtdb.ref(path + '/' + key);
+}
+
+async function getById(path, id) {
+  const key = await keyOf(path, id);
+  if (!key) return null;
+  const val = (await rtdb.ref(path + '/' + key).once('value')).val();
+  if (!val || typeof val !== 'object') return null;
+  return Object.assign({}, val, { id: val.id || id });
+}
+
+/**
+ * Alta o reemplazo completo. Un registro nuevo se escribe siempre indexado
+ * por id (modelo destino); uno que ya existe se reescribe en su llave actual
+ * para no duplicarlo.
+ */
 async function put(path, id, data) {
-  await child(path, id).set(data);
-  return Object.assign({ id: id }, data);
+  const key = (await keyOf(path, id)) || String(id);
+  await rtdb.ref(path + '/' + key).set(data);
+  return Object.assign({}, data, { id: id });
 }
 
 async function patch(path, id, data) {
-  await child(path, id).update(data);
+  const fila = await refOf(path, id);
+  await fila.update(data);
   return getById(path, id);
 }
 
@@ -163,6 +202,8 @@ module.exports = {
   newId: newId,
   now: now,
   asList: asList,
+  keyOf: keyOf,
+  refOf: refOf,
   getById: getById,
   put: put,
   patch: patch,
