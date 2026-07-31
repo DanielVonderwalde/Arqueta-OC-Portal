@@ -497,7 +497,7 @@ const snap = await fbRef.child('clients').orderByChild('id').equalTo(id).once('v
 return Object.values(snap.val() || {}).filter(Boolean).find(x=>x.portal_active) || null;
 }
 
-const aArreglo = v => !v ? [] : (Array.isArray(v) ? v.filter(Boolean) : Object.values(v).filter(Boolean));
+const aArreglo = (v)=>{ if(v===null||v===undefined) return []; const a=(Array.isArray(v)?v.slice():(typeof v==='object'?Object.keys(v).map(k=>v[k]):[])).filter(x=>x!==null&&x!==undefined); if(a.length && a.every(x=>x&&typeof x==='object'&&typeof x._orden==='number')) a.sort((x,y)=>x._orden-y._orden); return a; };
 
 /* Datos del cliente, ya recortados. Nunca se descarga la base completa. */
 async function cargarDatosDelCliente(client){
