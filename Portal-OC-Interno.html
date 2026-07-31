@@ -1012,16 +1012,32 @@ const fbRef = firebase.database().ref('arqueta_db');
    DATA MODEL
    ========================================================= */
 const AVATAR_COLORS = ['#2B5D9B','#2F6F62','#3E5C87','#5B78A5','#1A2744'];
+/* Las contraseñas ya no viajan en claro: se guarda el SHA-256 de
+"usuario:contraseña". Este archivo es público, así que esto NO sustituye a un
+login en el servidor — solo evita que la contraseña se lea de un vistazo en el
+código fuente.
+IMPORTANTE: estas contraseñas estuvieron en claro en el historial de git, así
+que hay que cambiarlas. Para obtener el hash de una nueva, abre la consola del
+navegador en esta página y ejecuta:
+  await hashCredencial('admin', 'LA_NUEVA_CONTRASEÑA')
+y pega el resultado en passHash. */
+async function sha256Hex(texto){
+const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(texto)));
+return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function hashCredencial(usuario, pass){
+return sha256Hex(String(usuario||'').trim().toLowerCase() + ':' + String(pass||''));
+}
 const USERS = [
-  {user:'admin', pass:'arqueta2026', role:'admin', label:'Administrador'},
-  {user:'asociado', pass:'arqueta2026', role:'asociado', label:'Asociado'}
+{user:'admin', passHash:'c299c00f8a9006c416b558b13dcde0cbc89b674ecc4bd85b8c28f696a71e150e', role:'admin', label:'Administrador'},
+{user:'asociado', passHash:'16cf8eda58f67cc27f6cd44971af53b06aab54a081b4d98ce176a04c5e58bd33', role:'asociado', label:'Asociado'}
 ];
 let currentRole = 'admin';
 
 function seedData(){
   return {
     clients: [
-      {id:'c-bimfasa', name:'Bimfasa', portal_email:'compras@bimfasa.com', portal_password:'Bimfasa2026!', portal_active:true, notes:''},
+      {id:'c-bimfasa', name:'Bimfasa', portal_email:'compras@bimfasa.com', portal_password_hash:'a059b1714a8f581a34e27e5dce934bd569c65d00c782e4f4ff18af4b5f61dec4', portal_active:true, notes:''},
       {id:'c-nayarit', name:'Chocolatera Nayarit', portal_email:'', portal_password:'', portal_active:false, notes:''},
       {id:'c-gamma', name:'Gamma Brands', portal_email:'', portal_password:'', portal_active:false, notes:''},
       {id:'c-taifelds', name:'Taifelds', portal_email:'', portal_password:'', portal_active:false, notes:''},
@@ -1323,57 +1339,98 @@ async function descargarAhora(){
 /* =========================================================
    AUTH
    ========================================================= */
-function handleLogin(){
-  const u = document.getElementById('login-user').value.trim();
-  const p = document.getElementById('login-pass').value;
-  const found = USERS.find(x=>x.user===u && x.pass===p);
-  if(found){
-    currentRole = found.role;
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app').classList.add('active');
-    sessionStorage.setItem('arqueta_admin_session', found.role);
-    document.querySelector('.sidebar-footer .who').textContent = '👤 ' + found.label;
-    renderAll();
-    applyRoleVisibility();
-    autoRespaldo();
-  } else {
-    document.getElementById('login-error').style.display='block';
-  }
+/* =========================================================
+AUTH
+Antes: al entrar se guardaba el rol en sessionStorage y, al recargar, se
+confiaba en ese valor tal cual — escribir 'admin' a mano en la consola
+bastaba para entrar como administrador. Ahora se guarda un token aleatorio
+con caducidad, y solo se acepta si tiene forma de UUID, no ha vencido y el
+usuario sigue existiendo.
+Ojo: esto corre en el navegador, así que sigue siendo una barrera débil.
+La sesión de verdad la tiene que emitir y validar la Cloud Function de login.
+========================================================= */
+const SESION_KEY = 'arqueta_admin_sesion';
+const SESION_LLAVE_VIEJA = 'arqueta_admin_session';
+const SESION_HORAS = 8;
+const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function guardarSesion(found){
+sessionStorage.setItem(SESION_KEY, JSON.stringify({
+token: (crypto.randomUUID ? crypto.randomUUID() : ''),
+user: found.user,
+role: found.role,
+exp: Date.now() + SESION_HORAS*3600*1000
+}));
+}
+function leerSesion(){
+let s = null;
+try{ s = JSON.parse(sessionStorage.getItem(SESION_KEY) || 'null'); }catch(_){ s = null; }
+if(!s || typeof s.token !== 'string' || !RE_UUID.test(s.token)) return null;
+if(!s.exp || Date.now() > s.exp) return null;
+return USERS.find(x => x.user === s.user && x.role === s.role) || null;
+}
+function abrirSesionUI(found){
+currentRole = found.role;
+document.getElementById('login-error').style.display='none';
+document.getElementById('login-screen').style.display='none';
+document.getElementById('app').classList.add('active');
+document.querySelector('.sidebar-footer .who').textContent = '👤 ' + found.label;
+renderAll();
+applyRoleVisibility();
+}
+async function handleLogin(){
+const u = document.getElementById('login-user').value.trim().toLowerCase();
+const p = document.getElementById('login-pass').value;
+try{
+const hash = await hashCredencial(u, p);
+const found = USERS.find(x => x.user === u && x.passHash === hash);
+if(found){
+guardarSesion(found);
+abrirSesionUI(found);
+autoRespaldo();
+} else {
+document.getElementById('login-error').style.display='block';
+}
+}catch(e){
+document.getElementById('login-error').style.display='block';
+}finally{
+document.getElementById('login-pass').value='';
+}
 }
 function applyRoleVisibility(){
-  document.querySelectorAll('.admin-only').forEach(el=>{
-    el.style.display = currentRole==='admin' ? '' : 'none';
-  });
-  if(currentRole!=='admin'){
-    ADMIN_ONLY_VIEWS.forEach(v=>{
-      const el = document.getElementById('view-'+v);
-      if(el && el.classList.contains('active')){ el.classList.remove('active'); document.getElementById('view-inicio').classList.add('active'); }
-    });
-  }
-  document.querySelectorAll('.zone-red').forEach(el=>{
-    el.style.display = currentRole==='admin' ? '' : 'none';
-  });
+document.querySelectorAll('.admin-only').forEach(el=>{
+el.style.display = currentRole==='admin' ? '' : 'none';
+});
+if(currentRole!=='admin'){
+ADMIN_ONLY_VIEWS.forEach(v=>{
+const el = document.getElementById('view-'+v);
+if(el && el.classList.contains('active')){ el.classList.remove('active'); document.getElementById('view-inicio').classList.add('active'); }
+});
+}
+document.querySelectorAll('.zone-red').forEach(el=>{
+el.style.display = currentRole==='admin' ? '' : 'none';
+});
 }
 function handleLogout(){
-  sessionStorage.removeItem('arqueta_admin_session');
-  document.getElementById('app').classList.remove('active');
-  document.getElementById('login-screen').style.display='flex';
-  document.getElementById('login-user').value='';
-  document.getElementById('login-pass').value='';
+sessionStorage.removeItem(SESION_KEY);
+sessionStorage.removeItem(SESION_LLAVE_VIEJA);
+document.getElementById('app').classList.remove('active');
+document.getElementById('login-screen').style.display='flex';
+document.getElementById('login-user').value='';
+document.getElementById('login-pass').value='';
 }
 document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') handleLogin(); });
+/* La sesión caduca sola: se revisa cada minuto. */
+setInterval(()=>{
+if(!document.getElementById('app').classList.contains('active')) return;
+if(!leerSesion()){ showToast('Tu sesión expiró — vuelve a entrar'); handleLogout(); }
+}, 60000);
 window.addEventListener('DOMContentLoaded', async ()=>{
-  document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{timeZone:TZ_MX, weekday:'long', year:'numeric', month:'long', day:'numeric'});
-  await initFirebase();
-  if(sessionStorage.getItem('arqueta_admin_session')){
-    currentRole = sessionStorage.getItem('arqueta_admin_session');
-    document.getElementById('login-screen').style.display='none';
-    document.getElementById('app').classList.add('active');
-    const found = USERS.find(x=>x.role===currentRole);
-    if(found) document.querySelector('.sidebar-footer .who').textContent = '👤 ' + found.label;
-    renderAll();
-    applyRoleVisibility();
-  }
+document.getElementById('inicio-date').textContent = new Date().toLocaleDateString('es-MX',{timeZone:TZ_MX, weekday:'long', year:'numeric', month:'long', day:'numeric'});
+sessionStorage.removeItem(SESION_LLAVE_VIEJA);
+await initFirebase();
+const found = leerSesion();
+if(found) abrirSesionUI(found);
 });
 
 function setExportPeriod(days){
@@ -4349,68 +4406,102 @@ function ctrlDelete(id){
 /* =========================================================
    PORTAL CLIENTES
    ========================================================= */
-function renderPortal(){
-  // Render notification email list
-  const emails = DB.notifEmails || ['daniel.vonderwalde@arquetaf.com'];
-  document.getElementById('notif-emails-list').innerHTML = emails.length ? emails.map((e,i)=>`
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;margin-bottom:6px;">
-      <span style="font-family:'JetBrains Mono',monospace;font-size:13px;">${e}</span>
-      <button class="btn btn-ghost" style="color:var(--brick);font-size:14px;padding:2px 6px;" onclick="removeNotifEmail(${i})">✕</button>
-    </div>`).join('') : '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Sin destinatarios configurados.</div>';
+/* =========================================================
+PORTAL CLIENTES
+La contraseña del cliente ya no se guarda en claro: se guarda su hash
+SHA-256 en portal_password_hash. Por eso esta pantalla ya no puede mostrarte
+la contraseña de un cliente, solo permite fijar una nueva. Las cuentas viejas
+siguen entrando con su contraseña anterior hasta que la vuelvas a guardar
+aquí; al guardarla se migra a hash automáticamente.
+========================================================= */
+const _pwRecien = {}; /* contraseñas recién generadas, solo en memoria */
 
-  document.getElementById('portal-cards').innerHTML = DB.clients.map(c=>`
-    <div class="card crop">
-      <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-        <div style="display:flex;align-items:center;gap:10px;">
-          <div class="avatar" style="background:${avatarColor(c.name)};">${initials(c.name)}</div>
-          <h3 style="margin:0;">${c.name}</h3>
-        </div>
-        ${c.portal_active ? '<span class="badge badge-active">Activo</span>' : '<span class="badge badge-inactive">Inactivo</span>'}
-      </div>
-      <div class="field"><label>Correo (usuario)</label><input type="text" id="pe-${c.id}" value="${c.portal_email}" placeholder="compras@cliente.com"></div>
-      <div class="field">
-        <label>Contraseña</label>
-        <div style="display:flex;gap:8px;">
-          <input type="password" id="pp-${c.id}" value="${c.portal_password}" style="flex:1;">
-          <button class="btn btn-ghost" onclick="togglePw('${c.id}')">👁</button>
-          <button class="btn btn-ghost" onclick="genPw('${c.id}')">🎲</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;margin:12px 0;">
-        <label class="pw-toggle"><input type="checkbox" id="pa-${c.id}" ${c.portal_active?'checked':''} onchange="togglePortalActive('${c.id}', this.checked)"> Portal activo</label>
-      </div>
-      <div class="copy-link">arqueta_portal_cliente.html <button class="btn btn-ghost" style="padding:2px 6px;" onclick="copyPortalInfo('${c.id}')">Copiar credenciales</button></div>
-      <div class="modal-actions" style="border:none;padding-top:14px;">
-        <button class="btn btn-primary btn-block" onclick="savePortalCreds('${c.id}')">Guardar</button>
-      </div>
-    </div>`).join('');
+function renderPortal(){
+// Render notification email list
+const emails = DB.notifEmails || ['daniel.vonderwalde@arquetaf.com'];
+document.getElementById('notif-emails-list').innerHTML = emails.length ? emails.map((e,i)=>`
+<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;margin-bottom:6px;">
+<span style="font-family:'JetBrains Mono',monospace;font-size:13px;">${e}</span>
+<button class="btn btn-ghost" style="color:var(--brick);font-size:14px;padding:2px 6px;" onclick="removeNotifEmail(${i})">✕</button>
+</div>`).join('') : '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Sin destinatarios configurados.</div>';
+
+document.getElementById('portal-cards').innerHTML = DB.clients.map(c=>{
+const tienePw = !!(c.portal_password_hash || c.portal_password);
+const estadoPw = c.portal_password_hash
+? 'Guardada como hash — ya no se puede consultar.'
+: (c.portal_password ? 'Todavía guardada en texto plano. Escribe o genera una nueva y guarda para migrarla a hash.' : 'Este cliente aún no tiene contraseña.');
+const placeholder = tienePw ? 'Sin cambios — escribe una nueva para cambiarla' : 'Define una contraseña';
+return `
+<div class="card crop">
+<div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+<div style="display:flex;align-items:center;gap:10px;">
+<div class="avatar" style="background:${avatarColor(c.name)};">${initials(c.name)}</div>
+<h3 style="margin:0;">${c.name}</h3>
+</div>
+${c.portal_active ? '<span class="badge badge-active">Activo</span>' : '<span class="badge badge-inactive">Inactivo</span>'}
+</div>
+<div class="field"><label>Correo (usuario)</label><input type="text" id="pe-${c.id}" value="${c.portal_email}" placeholder="compras@cliente.com"></div>
+<div class="field">
+<label>Contraseña</label>
+<div style="display:flex;gap:8px;">
+<input type="password" id="pp-${c.id}" value="" placeholder="${placeholder}" style="flex:1;">
+<button class="btn btn-ghost" onclick="togglePw('${c.id}')" title="Ver lo que estás escribiendo">👁</button>
+<button class="btn btn-ghost" onclick="genPw('${c.id}')" title="Generar una contraseña nueva">🎲</button>
+</div>
+<div class="small-note" style="margin-top:4px;">${estadoPw}</div>
+</div>
+<div style="display:flex;gap:8px;align-items:center;margin:12px 0;">
+<label class="pw-toggle"><input type="checkbox" id="pa-${c.id}" ${c.portal_active?'checked':''} onchange="togglePortalActive('${c.id}', this.checked)"> Portal activo</label>
+</div>
+<div class="copy-link">arqueta_portal_cliente.html <button class="btn btn-ghost" style="padding:2px 6px;" onclick="copyPortalInfo('${c.id}')">Copiar credenciales</button></div>
+<div class="modal-actions" style="border:none;padding-top:14px;">
+<button class="btn btn-primary btn-block" onclick="savePortalCreds('${c.id}')">Guardar</button>
+</div>
+</div>`;
+}).join('');
 }
 function togglePw(id){
-  const el = document.getElementById('pp-'+id);
-  el.type = el.type==='password' ? 'text' : 'password';
+const el = document.getElementById('pp-'+id);
+el.type = el.type==='password' ? 'text' : 'password';
 }
+/* Contraseña aleatoria de verdad: 16 caracteres con crypto.getRandomValues.
+La anterior salía de una lista de 5 palabras y 4 dígitos. */
 function genPw(id){
-  const words = ['Kraft','Sustrato','Carton','Prensa','Prensa'];
-  const pw = words[Math.floor(Math.random()*words.length)] + Math.floor(1000+Math.random()*9000) + '!';
-  document.getElementById('pp-'+id).value = pw;
-  document.getElementById('pp-'+id).type = 'text';
+const abc = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789#$%&*+-';
+const buf = new Uint32Array(16);
+crypto.getRandomValues(buf);
+const pw = Array.from(buf).map(n=>abc[n % abc.length]).join('');
+const el = document.getElementById('pp-'+id);
+el.value = pw; el.type = 'text';
+_pwRecien[id] = pw;
+showToast('Contraseña generada — cópiala ahora, después ya no se podrá consultar');
 }
 function togglePortalActive(id, val){
-  const c = clientById(id); c.portal_active = val; saveData(); renderClientsList();
+const c = clientById(id); c.portal_active = val; saveData(); renderClientsList();
 }
-function savePortalCreds(id){
-  const c = clientById(id);
-  c.portal_email = document.getElementById('pe-'+id).value.trim();
-  c.portal_password = document.getElementById('pp-'+id).value.trim();
-  saveData(); renderPortal(); renderClientsList();
-  showToast('Credenciales guardadas para '+c.name);
+async function savePortalCreds(id){
+const c = clientById(id);
+const campo = document.getElementById('pp-'+id);
+const nueva = (campo.value || '').trim();
+c.portal_email = document.getElementById('pe-'+id).value.trim().toLowerCase();
+if(nueva){
+c.portal_password_hash = await sha256Hex(nueva);
+delete c.portal_password;
+_pwRecien[id] = nueva;
+}
+saveData(); renderPortal(); renderClientsList();
+showToast(nueva ? 'Contraseña actualizada para '+c.name : 'Datos guardados para '+c.name);
 }
 function copyPortalInfo(id){
-  const c = clientById(id);
-  const text = `Usuario: ${c.portal_email}\nContraseña: ${c.portal_password}`;
-  navigator.clipboard?.writeText(text);
-  showToast('Credenciales copiadas al portapapeles');
+const c = clientById(id);
+const campo = document.getElementById('pp-'+id);
+const pw = (campo && campo.value.trim()) || _pwRecien[id] || '';
+const text = pw
+? 'Usuario: '+c.portal_email+'\nContraseña: '+pw
+: 'Usuario: '+c.portal_email+'\nContraseña: (ya no se puede consultar — genera una nueva con 🎲 y guarda)';
+navigator.clipboard?.writeText(text);
+showToast(pw ? 'Credenciales copiadas al portapapeles' : 'Usuario copiado — la contraseña ya no se puede consultar');
 }
 function addNotifEmail(){
   const input = document.getElementById('notif-new-email');
