@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "default": "arqueta-portal",
+    "prod": "arqueta-portal"
+  }
+}
