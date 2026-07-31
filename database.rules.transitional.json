@@ -1,0 +1,41 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "arqueta_db": {
+      ".read": true,
+      ".write": true,
+      "clients": { ".indexOn": ["portal_email", "portal_active"] },
+      "quotes": { ".indexOn": ["client_id", "status", "date"] },
+      "clientOCs": { ".indexOn": ["client_id", "status", "date_submitted"] },
+      "purchaseOrders": { ".indexOn": ["quote_id", "client_id", "status"] }
+    },
+
+    "arqueta_files": {
+      ".read": true,
+      ".write": true
+    },
+
+    "arqueta_backups": {
+      ".read": true,
+      ".write": true
+    },
+
+    "documents": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["quote_id", "client_oc_id", "client_id"]
+    },
+
+    "private": {
+      ".read": false,
+      ".write": false,
+      "credentials": {
+        "users": { ".indexOn": ["user", "role"] },
+        "clients": { ".indexOn": ["email_lower"] }
+      },
+      "sessions": { ".indexOn": ["sub"] }
+    }
+  }
+}
