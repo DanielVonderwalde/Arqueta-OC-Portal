@@ -32,7 +32,7 @@ function toPublic(row) {
     label: row.label || row.user,
     role: row.role,
     clients: row.clients || null,
-    active: row.active !== false,
+    activo: row.activo !== false && row.active !== false,
     needsPasswordUpgrade: row.algo !== 'bcrypt',
     createdAt: row.createdAt || null,
     updatedAt: row.updatedAt || null,
@@ -58,7 +58,7 @@ const resetSchema = z.object({ password: z.string().min(config.passwords.minLeng
 
 async function countActiveAdmins() {
   const snap = await db.ref(db.PATHS.credUsers).orderByChild('role').equalTo(ROLES.ADMIN).once('value');
-  return db.asList(snap.val()).filter(function (u) { return u.active !== false; }).length;
+  return db.asList(snap.val()).filter(function (u) { return (u.activo !== false && u.active !== false); }).length;
 }
 
 /* GET /v1/users */
@@ -87,7 +87,7 @@ router.post('/', rateLimit('write'), validate({ body: createSchema }), async fun
       passwordHash: await cred.hashPassword(body.password),
       algo: 'bcrypt',
       legacyHash: null,
-      active: true,
+      activo: true,
       createdAt: db.now(),
       createdBy: req.auth.sub
     };
@@ -110,7 +110,7 @@ router.patch('/:id', rateLimit('write'), validate({ body: updateSchema }), async
     const body = req.valid.body;
 
     /* No permitir quedarse sin ningun admin activo. */
-    if (body.role && body.role !== ROLES.ADMIN && existing.role === ROLES.ADMIN && existing.active !== false) {
+    if (body.role && body.role !== ROLES.ADMIN && existing.role === ROLES.ADMIN && (existing.activo !== false && existing.active !== false)) {
       const admins = await countActiveAdmins();
       if (admins <= 1) throw errors.conflict('No puedes quitar el ultimo administrador activo.');
     }
@@ -137,12 +137,12 @@ router.post('/:id/deactivate', rateLimit('write'), async function (req, res, nex
     if (!existing) throw errors.notFound('El usuario');
     if (id === String(req.auth.sub).toLowerCase()) throw errors.conflict('No puedes desactivar tu propio usuario.');
 
-    if (existing.role === ROLES.ADMIN && existing.active !== false) {
+    if (existing.role === ROLES.ADMIN && (existing.activo !== false && existing.active !== false)) {
       const admins = await countActiveAdmins();
       if (admins <= 1) throw errors.conflict('No puedes desactivar al ultimo administrador activo.');
     }
 
-    await db.child(db.PATHS.credUsers, id).update({ active: false, deactivatedAt: db.now(), deactivatedBy: req.auth.sub });
+    await db.child(db.PATHS.credUsers, id).update({ activo: false, deactivatedAt: db.now(), deactivatedBy: req.auth.sub });
     const closed = await cred.revokeAllSessionsOf(id);
 
     await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'user.deactivate', target: 'user', targetId: id, ip: req.clientIp, requestId: req.requestId, meta: { sessionsClosed: closed } });
@@ -158,7 +158,7 @@ router.post('/:id/reactivate', rateLimit('write'), async function (req, res, nex
     const id = String(req.params.id).toLowerCase();
     const existing = await db.getById(db.PATHS.credUsers, id);
     if (!existing) throw errors.notFound('El usuario');
-    await db.child(db.PATHS.credUsers, id).update({ active: true, reactivatedAt: db.now(), reactivatedBy: req.auth.sub });
+    await db.child(db.PATHS.credUsers, id).update({ activo: true, reactivatedAt: db.now(), reactivatedBy: req.auth.sub });
     await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'user.reactivate', target: 'user', targetId: id, ip: req.clientIp, requestId: req.requestId });
     res.json({ data: { ok: true } });
   } catch (err) {
