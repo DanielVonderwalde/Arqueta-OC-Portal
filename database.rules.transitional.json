@@ -6,10 +6,11 @@
     "arqueta_db": {
       ".read": true,
       ".write": true,
-      "clients": { ".indexOn": ["portal_email", "portal_active"] },
-      "quotes": { ".indexOn": ["client_id", "status", "date"] },
-      "clientOCs": { ".indexOn": ["client_id", "status", "date_submitted"] },
-      "purchaseOrders": { ".indexOn": ["quote_id", "client_id", "status"] }
+      "clients": { ".indexOn": ["id", "portal_email", "portal_active"] },
+      "quotes": { ".indexOn": ["id", "client_id", "status", "date"] },
+      "costBreakdown": { ".indexOn": ["id", "quote_id"] },
+      "clientOCs": { ".indexOn": ["id", "client_id", "status", "date_submitted"] },
+      "purchaseOrders": { ".indexOn": ["id", "quote_id", "client_id", "status"] }
     },
 
     "arqueta_files": {
