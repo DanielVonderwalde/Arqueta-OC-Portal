@@ -1090,6 +1090,16 @@ function normalizarDB(d){
   if(!d || typeof d !== 'object') return d;
   // Se garantiza que toda coleccion exista como arreglo, aunque Firebase la haya omitido por estar vacia.
   for(const c of COLECCIONES_DB){ d[c] = aArreglo(d[c]); }
+  // Los registros desactivados se apartan en <coleccion>Todos y desaparecen de las vistas
+  // activas, de modo que el resto del codigo sigue viendo unicamente lo vigente.
+  for(const c of COLECCIONES_DESACTIVABLES){
+    const clave = c + 'Todos';
+    const previos = Array.isArray(d[clave]) ? d[clave] : [];
+    const vistos = new Set(d[c].map(r=>idDe(c, r)));
+    const rezagados = previos.filter(r=>!estaActivo(r) && !vistos.has(idDe(c, r)));
+    d[clave] = d[c].concat(rezagados);
+    d[c] = d[clave].filter(estaActivo);
+  }
   return d;
 }
 function claveCosto(r){
@@ -1113,12 +1123,105 @@ function paraGuardar(d){
   if(!d || typeof d !== 'object') return d;
   const salida = {};
   for(const k of Object.keys(d)) salida[k] = d[k];
+  // Se reincorporan los desactivados para que nunca se pierdan al guardar.
+  for(const c of COLECCIONES_DESACTIVABLES){
+    const clave = c + 'Todos';
+    if(clave in salida){
+      const activos = aArreglo(salida[c]);
+      const vistos = new Set(activos.map(r=>idDe(c, r)));
+      const inactivos = aArreglo(salida[clave]).filter(r=>!estaActivo(r) && !vistos.has(idDe(c, r)));
+      salida[c] = activos.concat(inactivos);
+      delete salida[clave];
+    }
+  }
   for(const c of COLECCIONES_POR_ID){
     if(c in salida) salida[c] = aMapaIndexado(salida[c], (reg,i)=> (typeof reg.id === 'string' && reg.id) ? reg.id : (c + '-' + i));
   }
   if('costBreakdown' in salida) salida.costBreakdown = aMapaIndexado(salida.costBreakdown, claveCosto);
   if('notifEmails' in salida) salida.notifEmails = aArreglo(salida.notifEmails);
   return salida;
+}
+
+/* ============================================================
+   Desactivacion en lugar de borrado
+   Nada se elimina nunca: el registro se marca con activo:false,
+   desaparece de las vistas activas y se puede reactivar.
+   ============================================================ */
+const COLECCIONES_DESACTIVABLES = ['clients','quotes','clientOCs','purchaseOrders','costBreakdown'];
+function estaActivo(r){ return !(r && r.activo === false); }
+function idDe(coleccion, r){
+  if(!r || typeof r !== 'object') return null;
+  return coleccion === 'costBreakdown' ? claveCosto(r) : r.id;
+}
+function usuarioActual(){
+  try{
+    const w = document.querySelector('.sidebar-footer .who');
+    const t = w ? w.textContent.replace(/[^A-Za-z0-9@._\- ]/g,'').trim() : '';
+    if(t) return t;
+  }catch(_){}
+  return (typeof currentRole !== 'undefined' && currentRole) ? currentRole : 'desconocido';
+}
+function desactivarRegistro(reg){
+  if(!reg || typeof reg !== 'object' || reg.activo === false) return false;
+  reg.activo = false;
+  reg.deactivatedAt = new Date().toISOString();
+  reg.deactivatedBy = usuarioActual();
+  return true;
+}
+function reactivarRegistro(reg){
+  if(!reg || typeof reg !== 'object') return false;
+  reg.activo = true;
+  delete reg.deactivatedAt;
+  delete reg.deactivatedBy;
+  return true;
+}
+// normalizarDB solo conserva en la sombra lo que sigue desactivado, asi que al reactivar
+// hay que devolver el registro a la coleccion activa de forma explicita.
+function reincorporar(coleccion, reg){
+  if(!reg) return;
+  const arr = aArreglo(DB[coleccion]);
+  const id = idDe(coleccion, reg);
+  if(!arr.some(r=>idDe(coleccion, r) === id)) arr.push(reg);
+  DB[coleccion] = arr;
+}
+function todosDe(coleccion){
+  const t = DB[coleccion + 'Todos'];
+  return Array.isArray(t) ? t : aArreglo(DB[coleccion]);
+}
+function inactivosDe(coleccion){ return todosDe(coleccion).filter(r=>!estaActivo(r)); }
+function buscarEnTodos(coleccion, id){
+  return todosDe(coleccion).find(r=>idDe(coleccion, r) === id) || null;
+}
+function cotizacionesDeCliente(clientId){
+  return todosDe('quotes').filter(q=>q && q.client_id === clientId && estaActivo(q));
+}
+function ocsDeCliente(clientId){
+  return todosDe('clientOCs').filter(o=>o && o.client_id === clientId && estaActivo(o));
+}
+function desactivarCotizacion(q){
+  if(!desactivarRegistro(q)) return false;
+  todosDe('costBreakdown').forEach(r=>{ if(r && r.quote_id === q.id) desactivarRegistro(r); });
+  return true;
+}
+function desactivarCliente(c){
+  if(!desactivarRegistro(c)) return false;
+  c.portal_active = false;
+  cotizacionesDeCliente(c.id).forEach(desactivarCotizacion);
+  ocsDeCliente(c.id).forEach(desactivarRegistro);
+  return true;
+}
+function reactivarCotizacion(q){
+  const cli = todosDe('clients').find(c=>c && c.id === q.client_id);
+  if(cli && !estaActivo(cli)){
+    showToast('Primero reactiva al cliente ' + (cli.name||''));
+    return false;
+  }
+  reactivarRegistro(q);
+  reincorporar('quotes', q);
+  todosDe('costBreakdown').forEach(r=>{
+    if(r && r.quote_id === q.id && !estaActivo(r)){ reactivarRegistro(r); reincorporar('costBreakdown', r); }
+  });
+  return true;
 }
 
 function saveData(){
@@ -2142,15 +2245,19 @@ function saveClient(){
   showToast('Cliente guardado');
 }
 function deleteCurrentClient(){
-  const c = clientById(currentClientId);
-  if(!confirm(`¿Eliminar a ${c.name}? Esto también eliminará sus cotizaciones.`)) return;
-  const qids = quotesForClient(c.id).map(q=>q.id);
-  DB.quotes = DB.quotes.filter(q=>q.client_id!==c.id);
-  DB.costBreakdown = DB.costBreakdown.filter(r=>!qids.includes(r.quote_id));
-  DB.purchaseOrders = DB.purchaseOrders.filter(p=>p.client_id!==c.id);
-  DB.clients = DB.clients.filter(x=>x.id!==c.id);
+  const c = (DB.clients||[]).find(x=>x && x.id===currentClientId) || buscarEnTodos('clients', currentClientId);
+  if(!c) return;
+  const cot = cotizacionesDeCliente(c.id).length, ocs = ocsDeCliente(c.id).length;
+  let aviso = '¿Desactivar a ' + (c.name||'este cliente') + '?';
+  aviso += '\n\nNo se borra nada. Se conservan sus datos y su historial.';
+  if(cot || ocs) aviso += '\nSe desactivan tambien ' + cot + ' cotizacion(es) y ' + ocs + ' orden(es) del cliente.';
+  aviso += '\nPodras reactivarlo desde "Desactivados" en el menu.';
+  if(!confirm(aviso)) return;
+  desactivarCliente(c);
+  closeModal('modal-client');
+  currentClientId = null;
   saveData(); goTo('clientes'); renderAll();
-  showToast('Cliente eliminado');
+  showToast('Cliente desactivado — se conserva el historial');
 }
 
 /* =========================================================
@@ -2847,13 +2954,14 @@ function duplicateCurrentQuote(){
 }
 
 function deleteCurrentQuote(){
-  const q = quoteById(currentQuoteId);
-  if(!confirm(`¿Eliminar la cotización ${q.quote_number}?`)) return;
-  DB.costBreakdown = DB.costBreakdown.filter(r=>r.quote_id!==q.id);
-  DB.purchaseOrders = DB.purchaseOrders.filter(p=>p.quote_id!==q.id);
-  DB.quotes = DB.quotes.filter(x=>x.id!==q.id);
+  const q = (DB.quotes||[]).find(x=>x && x.id===currentQuoteId) || buscarEnTodos('quotes', currentQuoteId);
+  if(!q) return;
+  if(!confirm('¿Desactivar la cotización ' + (q.quote_number||'') + '?\n\nNo se borra: se conserva junto con su desglose de costos y podras reactivarla desde "Desactivados".')) return;
+  desactivarCotizacion(q);
+  closeModal('modal-quote');
+  currentQuoteId = null;
   saveData(); goTo('cotizaciones'); renderAll();
-  showToast('Cotización eliminada');
+  showToast('Cotización desactivada — se conserva el historial');
 }
 
 /* =========================================================
@@ -3296,10 +3404,12 @@ function setClientOCStatus(id, newStatus){
   if(oc){ oc.status = newStatus; saveData(); renderPOList(); showToast('Estado actualizado: '+newStatus); }
 }
 function deleteClientOC(id){
-  if(currentRole!=='admin'){ showToast('Solo el administrador puede eliminar órdenes de compra'); return; }
-  if(!confirm('¿Eliminar esta orden de compra del cliente?')) return;
-  DB.clientOCs = (DB.clientOCs||[]).filter(o=>o.id!==id);
-  saveData(); renderPOList(); showToast('Orden eliminada');
+  const oc = (DB.clientOCs||[]).find(o=>o && o.id===id) || buscarEnTodos('clientOCs', id);
+  if(!oc) return;
+  if(!confirm('¿Desactivar esta orden de compra del cliente?\n\nNo se borra: se conserva en "Desactivados" y podras reactivarla.')) return;
+  desactivarRegistro(oc);
+  saveData(); renderAll();
+  showToast('Orden desactivada — se conserva el historial');
 }
 async function downloadQuoteFile(kind, modo){
   if(!currentQuoteId) return;
@@ -3511,9 +3621,12 @@ async function triggerDownload(data, fileName){
   }
 }
 function deletePO(id){
-  if(!confirm('¿Eliminar esta orden de compra?')) return;
-  DB.purchaseOrders = DB.purchaseOrders.filter(p=>p.id!==id);
+  const po = (DB.purchaseOrders||[]).find(p=>p && p.id===id) || buscarEnTodos('purchaseOrders', id);
+  if(!po) return;
+  if(!confirm('¿Desactivar esta orden de compra?\n\nNo se borra: se conserva en "Desactivados" y podras reactivarla.')) return;
+  desactivarRegistro(po);
   saveData(); renderPOList(); renderInicio();
+  showToast('Orden desactivada — se conserva el historial');
 }
 
 /* =========================================================
@@ -4713,6 +4826,129 @@ function closeModal(id){ document.getElementById(id).classList.remove('active');
 document.querySelectorAll('.modal-overlay').forEach(ov=>{
   ov.addEventListener('click', e=>{ if(e.target===ov) ov.classList.remove('active'); });
 });
+
+/* ============================================================
+   Pantalla "Desactivados": ver e revertir lo desactivado.
+   Se construye con el DOM (sin innerHTML con datos) para no
+   introducir nuevos puntos de inyeccion.
+   ============================================================ */
+const GRUPOS_DESACTIVADOS = [
+  { clave:'clients',        titulo:'Clientes',                    etiqueta:r=>r.name || r.id },
+  { clave:'quotes',         titulo:'Cotizaciones',                etiqueta:r=>(r.quote_number || r.id) + (r.product_name ? ' — ' + r.product_name : '') },
+  { clave:'clientOCs',      titulo:'Órdenes de clientes',         etiqueta:r=>r.oc_number || r.id },
+  { clave:'purchaseOrders', titulo:'Órdenes de compra',           etiqueta:r=>r.po_number || r.numero || r.id }
+];
+
+function crearModalDesactivados(){
+  let ov = document.getElementById('modal-desactivados');
+  if(ov) return ov;
+  ov = document.createElement('div');
+  ov.className = 'modal-overlay';
+  ov.id = 'modal-desactivados';
+  const caja = document.createElement('div');
+  caja.className = 'modal wide';
+  const h = document.createElement('h2');
+  h.textContent = 'Desactivados';
+  const p = document.createElement('p');
+  p.style.cssText = 'color:#6B7A8D;font-size:13px;margin:6px 0 16px;';
+  p.textContent = 'Aquí queda todo lo que se desactivó. No se borra nada; puedes reactivarlo cuando quieras.';
+  const cuerpo = document.createElement('div');
+  cuerpo.id = 'desactivados-cuerpo';
+  const pie = document.createElement('div');
+  pie.style.cssText = 'margin-top:18px;text-align:right;';
+  const cerrar = document.createElement('button');
+  cerrar.className = 'btn btn-secondary';
+  cerrar.textContent = 'Cerrar';
+  cerrar.addEventListener('click', ()=>ov.classList.remove('active'));
+  pie.appendChild(cerrar);
+  caja.appendChild(h); caja.appendChild(p); caja.appendChild(cuerpo); caja.appendChild(pie);
+  ov.appendChild(caja);
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.classList.remove('active'); });
+  document.body.appendChild(ov);
+  return ov;
+}
+
+function renderDesactivados(){
+  const cuerpo = document.getElementById('desactivados-cuerpo');
+  if(!cuerpo) return;
+  while(cuerpo.firstChild) cuerpo.removeChild(cuerpo.firstChild);
+  let total = 0;
+  GRUPOS_DESACTIVADOS.forEach(g=>{
+    const filas = inactivosDe(g.clave);
+    if(!filas.length) return;
+    total += filas.length;
+    const t = document.createElement('h3');
+    t.textContent = g.titulo + ' (' + filas.length + ')';
+    t.style.cssText = 'margin:18px 0 8px;font-size:15px;';
+    cuerpo.appendChild(t);
+    const tabla = document.createElement('table');
+    tabla.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;';
+    filas.forEach(r=>{
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td');
+      c1.style.cssText = 'padding:7px 8px;border-bottom:1px solid #E8EAF0;';
+      c1.textContent = String(g.etiqueta(r) || '');
+      const c2 = document.createElement('td');
+      c2.style.cssText = 'padding:7px 8px;border-bottom:1px solid #E8EAF0;color:#6B7A8D;white-space:nowrap;';
+      const cuando = r.deactivatedAt ? String(r.deactivatedAt).slice(0,10) : '';
+      const quien = r.deactivatedBy ? (' por ' + r.deactivatedBy) : '';
+      c2.textContent = cuando ? (cuando + quien) : '';
+      const c3 = document.createElement('td');
+      c3.style.cssText = 'padding:7px 8px;border-bottom:1px solid #E8EAF0;text-align:right;';
+      const b = document.createElement('button');
+      b.className = 'btn btn-secondary';
+      b.style.cssText = 'padding:4px 12px;font-size:12px;';
+      b.textContent = 'Reactivar';
+      b.addEventListener('click', ()=>reactivarDesde(g.clave, idDe(g.clave, r)));
+      c3.appendChild(b);
+      tr.appendChild(c1); tr.appendChild(c2); tr.appendChild(c3);
+      tabla.appendChild(tr);
+    });
+    cuerpo.appendChild(tabla);
+  });
+  if(!total){
+    const vacio = document.createElement('p');
+    vacio.style.cssText = 'color:#6B7A8D;padding:20px 0;';
+    vacio.textContent = 'No hay nada desactivado.';
+    cuerpo.appendChild(vacio);
+  }
+}
+
+function reactivarDesde(coleccion, id){
+  const reg = buscarEnTodos(coleccion, id);
+  if(!reg) return;
+  let ok;
+  if(coleccion === 'quotes'){ ok = reactivarCotizacion(reg); }
+  else { ok = reactivarRegistro(reg); if(ok) reincorporar(coleccion, reg); }
+  if(!ok) return;
+  if(coleccion === 'clients') reg.portal_active = true;
+  saveData(); renderAll(); renderDesactivados();
+  showToast('Registro reactivado');
+}
+
+function abrirDesactivados(){
+  crearModalDesactivados();
+  renderDesactivados();
+  document.getElementById('modal-desactivados').classList.add('active');
+}
+
+(function agregarAccesoDesactivados(){
+  function poner(){
+    if(document.getElementById('nav-desactivados')) return;
+    const items = document.querySelectorAll('.sidebar .nav-item');
+    if(!items.length) return;
+    const ultimo = items[items.length-1];
+    const item = document.createElement('div');
+    item.className = 'nav-item admin-only';
+    item.id = 'nav-desactivados';
+    item.textContent = '⊘ Desactivados';
+    item.addEventListener('click', abrirDesactivados);
+    ultimo.parentNode.insertBefore(item, ultimo.nextSibling);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', poner);
+  else poner();
+})();
+
 </script>
 </body>
 </html>
