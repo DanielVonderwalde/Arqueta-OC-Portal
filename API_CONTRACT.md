@@ -326,3 +326,98 @@ por omision hasta que el envio se mueva al servidor en la fase 4.
 
 **Archivos adjuntos.** Siguen subiendose directo a `arqueta_files`, tambien con
 la API activa. Se cambian por URL firmada en la fase 4 (`/v1/documents`).
+
+
+## 8. Respaldo y migracion a mapas indexados (2026-07-31)
+
+### 8.1 Decision tomada sobre el borrado
+
+Queda resuelto el pendiente de 7.3: **no habra borrado fisico**. Los registros solo se
+desactivan y el historial se conserva. La API mantiene su diseno original (sin endpoints
+DELETE) y el portal interno debera alinearse a esa semantica.
+
+### 8.2 Respaldo previo
+
+Antes de tocar un solo dato se guardaron dos copias del nodo `arqueta_db` completo:
+
+| Ruta | Proposito |
+|---|---|
+| `arqueta_backups/snapshots/2026-07-31` | Snapshot diario, mismo formato que ya usaba el portal |
+| `arqueta_backups/premigracion/2026-07-31-mapas-indexados` | Copia fija, fuera de la rotacion diaria |
+
+Formato: `{ fecha, bytes, data }` donde `data` es el JSON serializado. Ambas copias se
+releyeron y se compararon caracter por caracter contra el nodo vivo: identicas (24 871
+caracteres; 12 cotizaciones, 30 clientes, 4 OCs, 54 filas de costo, 2 correos, 2 de
+historial). Las copias anteriores del 21 al 30 de julio siguen intactas.
+
+### 8.3 El problema
+
+Todas las colecciones se guardaban como arreglos con indice numerico, asi que la clave de
+almacenamiento era la posicion (`0`, `1`, `2`...) y no el id del registro. Consecuencias:
+
+- `db.patch(ruta, id, ...)` escribia en `<ruta>/<id>`, una clave que no existia: en vez de
+  actualizar el registro habria creado uno nuevo en paralelo.
+- No se podia leer ni actualizar un registro por id sin descargar la coleccion entera.
+- Borrar un elemento intermedio de un arreglo deja huecos y Firebase convierte el nodo a
+  objeto de forma impredecible.
+
+### 8.4 Estrategia: tolerante en lectura, indexada en escritura
+
+El orden importaba, porque `renderQuotesList` y `renderClientsList` no ordenan: muestran los
+registros en el orden en que vienen. Un mapa se lee en orden lexicografico de claves, asi
+que migrar sin mas habria reordenado las listas a la vista del usuario. Por eso cada
+registro lleva ahora un campo `_orden` que preserva la posicion original.
+
+En `Portal-OC-Interno.html`:
+
+| Funcion | Que hace |
+|---|---|
+| `aArreglo(v)` | Acepta arreglo (legado) o mapa indexado y siempre devuelve un arreglo, ordenado por `_orden` cuando todos los registros lo traen |
+| `normalizarDB(d)` | Aplica `aArreglo` a cada coleccion; garantiza que exista como arreglo vacio si Firebase la omitio por estar vacia |
+| `aMapaIndexado(arr, claveFn)` | Convierte a mapa, asigna `_orden` y sanea caracteres no validos en claves |
+| `paraGuardar(d)` | Deja el objeto listo para escribir: mapas por id |
+
+Se normaliza en `saveData`, `mergeFiles` y `renderAll`, de forma idempotente. En
+`Portal-Clientes.html` ya existia `aArreglo`; solo se le agrego el orden por `_orden`.
+
+Claves resultantes:
+
+| Coleccion | Clave |
+|---|---|
+| `quotes`, `clients`, `clientOCs`, `purchaseOrders`, `controllerHistory` | el `id` del registro |
+| `costBreakdown` | `cb-<quote_id>-<quantity_tier>` con el volumen rellenado a 9 digitos, para que el orden lexicografico coincida con el numerico |
+| `notifEmails` | sigue siendo un arreglo de textos, no tiene id |
+
+**Compatibilidad en ambos sentidos.** Una pestana con la version anterior abierta que guarde
+arreglos no rompe nada: la version nueva los vuelve a indexar en el siguiente guardado.
+
+### 8.5 Verificacion
+
+1. Ida y vuelta sobre los datos reales de produccion: arreglos -> mapas -> arreglos devuelve
+   exactamente el mismo contenido y el mismo orden en las 6 colecciones, incluyendo el
+   reordenamiento lexicografico que aplica Firebase al releer un mapa.
+2. Las dos versiones se compilaron y se verifico que los 3 scripts embebidos del portal
+   interno y los 2 del portal de clientes parsean sin errores.
+3. Tras migrar: las claves de `quotes`, `clients` y `clientOCs` son exactamente los ids, y
+   `GET /arqueta_db/clients/<id>` devuelve el registro sin escanear la coleccion.
+4. Se cargo el nodo migrado tal cual llega de Firebase en el portal interno publicado y se
+   ejecuto `renderAll()`: sin errores, 30 clientes, 12 cotizaciones, 4 OCs, 54 filas de costo.
+5. Un guardado simulado sobre esos datos reproduce los mismos mapas por id: es estable.
+
+### 8.6 Lo que falta y necesita Codespaces
+
+Las reglas del repo ya declaran los indices, **pero nunca se han desplegado**. Comprobado
+contra la base viva: cualquier consulta `orderByChild` responde
+`Index not defined` por REST. El SDK del navegador no falla, pero eso es peor: descarga el
+nodo completo y filtra en el cliente. Es decir, la busqueda de credenciales previa al login
+sigue trayendo los 30 clientes al navegador, justo lo que el punto 3 del Prompt A queria
+evitar. El filtrado del lado del servidor **no esta activo todavia**.
+
+Se intento leer `/.settings/rules.json` por REST y responde `403 Permission denied`, asi que
+las reglas no se pueden desplegar desde el navegador. Hace falta, desde Codespaces:
+
+```bash
+firebase deploy --only database
+```
+
+Mientras tanto los indices son solo una intencion escrita en el repo.
