@@ -70,17 +70,30 @@ const quoteSchema = z.object({
   lugar_entrega: z.string().max(160).optional()
 }).strict();
 
+/* El desglose de costos NO es una lista de conceptos sueltos: es un renglon
+   por volumen (quantity_tier) con el desglose de insumos y el precio de venta.
+   Asi lo captura el panel interno y asi vive ya en arqueta_db/costBreakdown.
+   El esquema anterior ({ concepto, unidad, cantidad, costo_unitario }) no
+   correspondia a ningun campo real de la aplicacion. */
+const numeroOpc = z.coerce.number().nullable().optional();
+
+const tierSchema = z.object({
+  quantity_tier: z.coerce.number().min(1),
+  sustrato: numeroOpc,
+  acabado: numeroOpc,
+  materiales: numeroOpc,
+  mod: numeroOpc,
+  ee: numeroOpc,
+  extras: numeroOpc,
+  transporte: numeroOpc,
+  valor_venta_total: numeroOpc,
+  margen: numeroOpc,
+  blended: z.boolean().optional(),
+  real: numeroOpc
+}).strict();
+
 const costSchema = z.object({
-  items: z.array(z.object({
-    concepto: z.string().max(120),
-    unidad: z.string().max(40).optional(),
-    cantidad: z.coerce.number().optional(),
-    costo_unitario: z.coerce.number().optional(),
-    total: z.coerce.number().optional()
-  })).max(200),
-  margen: z.coerce.number().min(0).max(100).optional(),
-  moneda: z.string().max(8).optional(),
-  notas: z.string().max(2000).optional()
+  tiers: z.array(tierSchema).max(50)
 }).strict();
 
 /* GET /v1/quotes */
@@ -177,26 +190,61 @@ router.patch('/:id', requireInternal, rateLimit('write'), validate({ body: quote
   }
 });
 
-/* GET /v1/quotes/:id/cost-breakdown  (solo admin) */
+/* GET /v1/quotes/:id/cost-breakdown  (solo admin)
+   Devuelve los renglones por volumen de esa cotizacion. Va por el indice
+   .indexOn de quote_id, asi que la base no entrega la tabla completa. */
 router.get('/:id/cost-breakdown', requireAdmin, rateLimit('read'), async function (req, res, next) {
   try {
-    const snap = await db.child(db.PATHS.costBreakdown, req.params.id).once('value');
-    res.json({ data: snap.val() || null });
+    const quoteId = String(req.params.id);
+    const quote = await db.getById(db.PATHS.quotes, quoteId);
+    if (!quote) throw errors.notFound('La cotizacion');
+
+    const snap = await db.ref(db.PATHS.costBreakdown).orderByChild('quote_id').equalTo(quoteId).once('value');
+    const tiers = db.asList(snap.val())
+      .map(function (r) {
+        const c = Object.assign({}, r);
+        delete c.id;
+        delete c.updatedBy;
+        return c;
+      })
+      .sort(function (a, b) { return (a.quantity_tier || 0) - (b.quantity_tier || 0); });
+
+    res.json({ data: { quote_id: quoteId, tiers: tiers } });
   } catch (err) {
     next(err);
   }
 });
 
-/* PUT /v1/quotes/:id/cost-breakdown  (solo admin) */
+/* PUT /v1/quotes/:id/cost-breakdown  (solo admin)
+   Reemplaza los renglones de ESTA cotizacion y no toca los de las demas.
+   Va como una sola escritura multiruta: o entran todos o no entra ninguno,
+   para que no quede un desglose a medias si se corta la conexion. */
 router.put('/:id/cost-breakdown', requireAdmin, rateLimit('write'), validate({ body: costSchema }), async function (req, res, next) {
   try {
-    const quote = await db.getById(db.PATHS.quotes, req.params.id);
+    const quoteId = String(req.params.id);
+    const quote = await db.getById(db.PATHS.quotes, quoteId);
     if (!quote) throw errors.notFound('La cotizacion');
 
-    const payload = Object.assign({}, req.valid.body, { quote_id: req.params.id, updatedAt: db.now(), updatedBy: req.auth.sub });
-    await db.child(db.PATHS.costBreakdown, req.params.id).set(payload);
-    await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'quote.cost_update', target: 'quote', targetId: req.params.id, ip: req.clientIp, requestId: req.requestId });
-    res.json({ data: payload });
+    const snap = await db.ref(db.PATHS.costBreakdown).orderByChild('quote_id').equalTo(quoteId).once('value');
+    const previos = snap.val() || {};
+
+    const cambios = {};
+    Object.keys(previos).forEach(function (k) { cambios[k] = null; });
+
+    req.valid.body.tiers.forEach(function (t) {
+      const key = db.newId('cb');
+      cambios[key] = Object.assign({}, t, {
+        id: key,
+        quote_id: quoteId,
+        updatedAt: db.now(),
+        updatedBy: req.auth.sub
+      });
+    });
+
+    await db.ref(db.PATHS.costBreakdown).update(cambios);
+    await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'quote.cost_update', target: 'quote', targetId: quoteId, ip: req.clientIp, requestId: req.requestId, meta: { tiers: req.valid.body.tiers.length, reemplazados: Object.keys(previos).length } });
+
+    res.json({ data: { quote_id: quoteId, tiers: req.valid.body.tiers.length } });
   } catch (err) {
     next(err);
   }
