@@ -341,6 +341,9 @@ e.codigo = (cuerpo && cuerpo.error) ? cuerpo.error.code : ('http_' + r.status);
 e.status = r.status;
 throw e;
 }
+/* Las listas llegan en sobre { data, page }. Con completo:true se
+   devuelve el sobre entero para poder seguir el cursor. */
+if(cfg.completo) return cuerpo;
 return cuerpo ? cuerpo.data : null;
 },
 /* Si el access token vencio, lo renueva una vez y reintenta. */
@@ -366,10 +369,101 @@ const d = await this.crudo(ruta, {method:'POST', body:credenciales}, false);
 this.guardarTokens(d.tokens);
 return d.identity;
 },
+/* Recorre la paginacion del servidor. El filtrado sigue siendo del
+   servidor: aqui solo se van juntando las paginas. */
+async listaCompleta(ruta, params){
+  const salida = [];
+  let cursor = null, vueltas = 0;
+  do{
+    const qs = new URLSearchParams(Object.assign({limit:'100'}, params||{}));
+    if(cursor) qs.set('cursor', cursor);
+    const sobre = await this.llamar(ruta + '?' + qs.toString(), {completo:true});
+    ((sobre && sobre.data) || []).forEach(x=>salida.push(x));
+    cursor = (sobre && sobre.page && sobre.page.hasMore) ? sobre.page.nextCursor : null;
+  } while(cursor && ++vueltas < 100);
+  return salida;
+},
 async salir(){
 try{ await this.llamar('/auth/logout', {method:'POST'}); }catch(_){}
 this.borrarTokens();
 }
+};
+
+/* =========================================================
+   CAPA DE DATOS (fase 3 de la migracion)
+
+   Un solo lugar decide de donde salen los datos: de la API si esta
+   configurada, o de Firebase como hasta hoy. Las pantallas no se enteran.
+   Mientras API_BASE siga vacio, todo esto se comporta exactamente igual
+   que antes de este cambio.
+   ========================================================= */
+const datos = {
+  async cotizacionesDe(client){
+    if(api.activa()){
+      /* El servidor ya filtra por client_id; aqui solo se recorren paginas. */
+      const lista = await api.listaCompleta('/quotes', {client_id: client.id});
+      return lista.filter(esVisibleParaCliente);
+    }
+    const snap = await fbRef.child('quotes').orderByChild('client_id').equalTo(client.id).once('value');
+    return aArreglo(snap.val()).filter(esVisibleParaCliente);
+  },
+
+  /* Escalera de precios: volumen y precio de venta, nada mas. El desglose
+     de costos (sustrato, MOD, transporte, margen) no sale del servidor. */
+  async escalerasDe(cotizaciones){
+    const filas = [];
+    for(const q of cotizaciones){
+      let tiers = [];
+      if(api.activa()){
+        const d = await api.llamar('/quotes/' + encodeURIComponent(q.id) + '/price-tiers');
+        tiers = (d && d.tiers) ? d.tiers : [];
+      } else {
+        const snap = await fbRef.child('costBreakdown').orderByChild('quote_id').equalTo(q.id).once('value');
+        tiers = aArreglo(snap.val());
+      }
+      tiers.forEach(r=>filas.push({
+        quote_id: q.id,
+        quantity_tier: r.quantity_tier,
+        valor_venta_total: r.valor_venta_total
+      }));
+    }
+    return filas;
+  },
+
+  async ocsDe(client){
+    const lista = api.activa()
+      ? await api.listaCompleta('/orders/client', {client_id: client.id})
+      : aArreglo((await fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id).once('value')).val());
+    lista.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
+    return lista;
+  },
+
+  /* Correos de aviso. Con la API activa la base queda cerrada al navegador,
+     asi que el aviso sale a la direccion por omision hasta que el envio se
+     mueva al servidor (fase 4). */
+  async correosAviso(){
+    if(api.activa()) return [];
+    return aArreglo((await fbRef.child('notifEmails').once('value')).val());
+  },
+
+  /* Alta de una orden de compra.
+     Con la API el servidor asigna id, fecha y semaforo y responde con la
+     fila ya guardada: eso es lo que se queda en memoria, no el borrador.
+     Sin API se escribe solo esa OC en su propia llave, como hasta ahora. */
+  async crearOC(borrador){
+    if(api.activa()){
+      return await api.llamar('/orders/client', {method:'POST', body:{
+        client_id: borrador.client_id,
+        oc_number: borrador.oc_number,
+        notes: borrador.notes,
+        fecha_deseada: borrador.fecha_deseada,
+        urgente: borrador.urgente,
+        lines: borrador.lines
+      }});
+    }
+    await guardarMiOC(borrador);
+    return borrador;
+  }
 };
 
 const SESION_KEY = 'arqueta_portal_sesion';
@@ -407,26 +501,20 @@ const aArreglo = v => !v ? [] : (Array.isArray(v) ? v.filter(Boolean) : Object.v
 
 /* Datos del cliente, ya recortados. Nunca se descarga la base completa. */
 async function cargarDatosDelCliente(client){
-const [snapQ, snapOC, snapMails] = await Promise.all([
-fbRef.child('quotes').orderByChild('client_id').equalTo(client.id).once('value'),
-fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id).once('value'),
-fbRef.child('notifEmails').once('value')
-]);
-const visibles = aArreglo(snapQ.val()).filter(esVisibleParaCliente);
-const tiers = [];
-for(const q of visibles){
-const snapT = await fbRef.child('costBreakdown').orderByChild('quote_id').equalTo(q.id).once('value');
-aArreglo(snapT.val()).forEach(r=>tiers.push({quote_id:r.quote_id, quantity_tier:r.quantity_tier, valor_venta_total:r.valor_venta_total}));
-}
-DB = {
-clients: [client],
-quotes: visibles,
-costBreakdown: tiers,
-purchaseOrders: [],
-clientOCs: aArreglo(snapOC.val()),
-notifEmails: aArreglo(snapMails.val())
-};
-DB.clientOCs.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
+  const visibles = await datos.cotizacionesDe(client);
+  const [tiers, ocs, correos] = await Promise.all([
+    datos.escalerasDe(visibles),
+    datos.ocsDe(client),
+    datos.correosAviso()
+  ]);
+  DB = {
+    clients: [client],
+    quotes: visibles,
+    costBreakdown: tiers,
+    purchaseOrders: [],
+    clientOCs: ocs,
+    notifEmails: correos
+  };
 }
 
 /* Token aleatorio con caducidad, generado solo tras un login correcto. */
@@ -438,20 +526,34 @@ exp: Date.now() + SESION_HORAS*3600*1000
 }));
 }
 
-/* El listener en vivo ya no escucha toda la base, solo las OCs de este cliente. */
+/* Actualizacion en vivo de MIS ordenes.
+   Sin API: listener de Firebase acotado a este cliente.
+   Con API: no hay canal en vivo, asi que se vuelve a preguntar cada 60 s. */
 let _ocListener = null;
+let _ocTimer = null;
 function escucharMisOCs(client){
-dejarDeEscuchar();
-_ocListener = fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id);
-_ocListener.on('value', snap=>{
-if(!currentClient) return;
-DB.clientOCs = aArreglo(snap.val());
-DB.clientOCs.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
-renderMyOCs(currentClient);
-});
+  dejarDeEscuchar();
+  if(api.activa()){
+    _ocTimer = setInterval(async ()=>{
+      if(!currentClient) return;
+      try{
+        DB.clientOCs = await datos.ocsDe(currentClient);
+        renderMyOCs(currentClient);
+      }catch(_){ /* si falla una vuelta, se reintenta en la siguiente */ }
+    }, 60000);
+    return;
+  }
+  _ocListener = fbRef.child('clientOCs').orderByChild('client_id').equalTo(client.id);
+  _ocListener.on('value', snap=>{
+    if(!currentClient) return;
+    DB.clientOCs = aArreglo(snap.val());
+    DB.clientOCs.forEach(o=>{ if(o.lines) o.lines = aArreglo(o.lines); });
+    renderMyOCs(currentClient);
+  });
 }
 function dejarDeEscuchar(){
-if(_ocListener){ try{ _ocListener.off(); }catch(_){} _ocListener = null; }
+  if(_ocListener){ try{ _ocListener.off(); }catch(_){} _ocListener = null; }
+  if(_ocTimer){ clearInterval(_ocTimer); _ocTimer = null; }
 }
 
 async function entrarComo(client){
@@ -917,7 +1019,7 @@ function enviarOCConfirmada(d){
 
   const finish = async (fileName, fileData) => {
     if(!DB.clientOCs) DB.clientOCs = [];
-    const nuevaOC = {
+    const borrador = {
       id: uid('coc'),
       client_id: currentClient.id,
       oc_number: ocNumber,
@@ -931,14 +1033,22 @@ function enviarOCConfirmada(d){
       status: 'pendiente',
       alerta_max: lines.some(l=>l.alerta==='bad') ? 'bad' : (lines.some(l=>l.alerta==='warn') ? 'warn' : 'ok')
     };
-    DB.clientOCs.push(nuevaOC);
+    let nuevaOC;
     try{
-      await guardarMiOC(nuevaOC);
+      nuevaOC = await datos.crearOC(borrador);
     }catch(e){
-      DB.clientOCs = DB.clientOCs.filter(o=>o.id!==nuevaOC.id);
       showToast('No se pudo enviar la orden: ' + e.message);
       return;
     }
+    /* Pendiente de la fase 4: el archivo adjunto todavia se sube directo a
+       arqueta_files. Cuando /v1/documents este en uso esto se cambia por una
+       URL firmada y el navegador deja de escribir en Firebase. */
+    if(api.activa() && fileData && fileData.length > 100){
+      try{
+        await fbFilesRef.child('oc_' + nuevaOC.id).set({name: fileName, data: fileData});
+      }catch(_){ showToast('La orden se envió, pero el archivo adjunto no se pudo subir'); }
+    }
+    DB.clientOCs.push(nuevaOC);
     document.getElementById('oc-number').value='';
     document.getElementById('oc-notes').value='';
     document.getElementById('oc-fecha-deseada').value='';
