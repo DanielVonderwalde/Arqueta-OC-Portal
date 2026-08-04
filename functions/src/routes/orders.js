@@ -18,7 +18,7 @@ const { z } = require('zod');
 const { errors } = require('../lib/errors');
 const db = require('../lib/db');
 const { validate, rateLimit } = require('../middleware/security');
-const { authenticate, requireInternal, resolveClientScope, rowVisibleFor, ROLES } = require('../middleware/auth');
+const { authenticate, requireAdmin, requireInternal, resolveClientScope, rowVisibleFor, ROLES } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(authenticate);
@@ -171,7 +171,45 @@ router.post('/client', rateLimit('write'), validate({ body: clientOcSchema }), a
   }
 });
 
-/* Solo el equipo interno mueve el estatus y la facturacion. */
+/* Autorizacion del administrador (2026-08-03)
+
+   TODO cambio de estatus de una orden de compra de cliente lo autoriza un
+   administrador: aceptar, rechazar, facturar y regresar a pendiente. El
+   asociado ya no mueve el estatus; deja una solicitud en
+   autorizacion_pendiente y la orden se queda como estaba, de modo que el
+   cliente sigue viendo 'pendiente' hasta que el admin la acepte.
+
+   Nada se sobrescribe sin dejar rastro: cada solicitud y cada decision se
+   agregan a la lista autorizaciones de la propia orden, ademas del
+   auditLog. Ningun campo se elimina. */
+const ACCIONES_AUTORIZABLES = OC_STATUSES;
+
+const decisionSchema = z.object({
+  decision: z.enum(['autorizar', 'no_autorizar']),
+  motivo: z.string().max(500).optional(),
+  factura_numero: z.string().max(60).optional(),
+  factura_fecha: z.string().max(20).optional()
+}).strict();
+
+function historialDe(row) {
+  return Array.isArray(row.autorizaciones) ? row.autorizaciones.slice() : [];
+}
+
+/* autorizacion_pendiente: null borra la solicitud en RTDB; el historial
+   queda en autorizaciones. */
+function patchDeEstatus(existing, accion, extra) {
+  const e = extra || {};
+  return {
+    status: accion,
+    factura_numero: e.factura_numero || existing.factura_numero || '',
+    factura_fecha: e.factura_fecha || existing.factura_fecha || '',
+    statusMotivo: e.motivo || null,
+    statusUpdatedAt: db.now(),
+    statusUpdatedBy: e.actor || null,
+    autorizacion_pendiente: null
+  };
+}
+
 router.patch('/client/:id/status', requireInternal, rateLimit('write'), validate({ body: statusSchema }), async function (req, res, next) {
   try {
     const existing = await db.getById(db.PATHS.clientOCs, req.params.id);
@@ -179,20 +217,78 @@ router.patch('/client/:id/status', requireInternal, rateLimit('write'), validate
     resolveClientScope(req, existing.client_id);
 
     const body = req.valid.body;
+    const ahora = db.now();
     if (body.status === 'facturada' && !body.factura_numero) {
       throw errors.badRequest('Para marcar como facturada hay que indicar factura_numero.');
     }
 
-    const patch = {
-      status: body.status,
-      factura_numero: body.factura_numero || existing.factura_numero || '',
-      factura_fecha: body.factura_fecha || existing.factura_fecha || '',
-      statusMotivo: body.motivo || null,
-      statusUpdatedAt: db.now(),
-      statusUpdatedBy: req.auth.sub
-    };
+    /* Asociado: solicitud, no cambio. El estatus sigue igual. */
+    if (req.auth.role !== ROLES.ADMIN) {
+      const solicitud = {
+        accion: body.status,
+        desde: existing.status || 'pendiente',
+        motivo: body.motivo || '',
+        factura_numero: body.factura_numero || '',
+        factura_fecha: body.factura_fecha || '',
+        solicitadoPor: req.auth.sub,
+        solicitadoEn: ahora
+      };
+      const previo = historialDe(existing);
+      previo.push({ accion: body.status, resultado: 'solicitada', por: req.auth.sub, fecha: ahora, motivo: body.motivo || '' });
+      const pendiente = await db.patch(db.PATHS.clientOCs, req.params.id, { autorizacion_pendiente: solicitud, autorizaciones: previo });
+      await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'client_oc.status_request', target: 'client_oc', targetId: req.params.id, ip: req.clientIp, requestId: req.requestId, meta: { from: existing.status, to: body.status } });
+      return res.status(202).json({ data: pendiente });
+    }
+
+    const lista = historialDe(existing);
+    lista.push({ accion: body.status, resultado: 'autorizada', por: req.auth.sub, fecha: ahora, motivo: body.motivo || '' });
+    const patch = patchDeEstatus(existing, body.status, { factura_numero: body.factura_numero, factura_fecha: body.factura_fecha, motivo: body.motivo, actor: req.auth.sub });
+    patch.autorizaciones = lista;
     const row = await db.patch(db.PATHS.clientOCs, req.params.id, patch);
     await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'client_oc.status', target: 'client_oc', targetId: req.params.id, ip: req.clientIp, requestId: req.requestId, meta: { from: existing.status, to: body.status } });
+    res.json({ data: row });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* Solo el administrador resuelve la solicitud del asociado. */
+router.post('/client/:id/authorization', requireAdmin, rateLimit('write'), validate({ body: decisionSchema }), async function (req, res, next) {
+  try {
+    const existing = await db.getById(db.PATHS.clientOCs, req.params.id);
+    if (!existing) throw errors.notFound('La orden de compra');
+    resolveClientScope(req, existing.client_id);
+
+    const solicitud = existing.autorizacion_pendiente;
+    if (!solicitud || ACCIONES_AUTORIZABLES.indexOf(solicitud.accion) < 0) {
+      throw errors.conflict('Esa orden no tiene ninguna solicitud pendiente de autorizacion.');
+    }
+
+    const body = req.valid.body;
+    const ahora = db.now();
+    const autoriza = body.decision === 'autorizar';
+    const facturaNumero = body.factura_numero || solicitud.factura_numero || existing.factura_numero || '';
+    if (autoriza && solicitud.accion === 'facturada' && !facturaNumero) {
+      throw errors.badRequest('Para autorizar la facturacion hay que indicar factura_numero.');
+    }
+
+    const lista = historialDe(existing);
+    lista.push({
+      accion: solicitud.accion,
+      resultado: autoriza ? 'autorizada' : 'no_autorizada',
+      solicitadoPor: solicitud.solicitadoPor || '',
+      por: req.auth.sub,
+      fecha: ahora,
+      motivo: body.motivo || ''
+    });
+
+    const patch = autoriza
+      ? patchDeEstatus(existing, solicitud.accion, { factura_numero: facturaNumero, factura_fecha: body.factura_fecha || solicitud.factura_fecha, motivo: body.motivo || solicitud.motivo, actor: req.auth.sub })
+      : { autorizacion_pendiente: null };
+    patch.autorizaciones = lista;
+
+    const row = await db.patch(db.PATHS.clientOCs, req.params.id, patch);
+    await db.writeAudit({ actor: req.auth.sub, actorRole: req.auth.role, action: 'client_oc.authorization', target: 'client_oc', targetId: req.params.id, ip: req.clientIp, requestId: req.requestId, meta: { accion: solicitud.accion, decision: body.decision, solicitadoPor: solicitud.solicitadoPor || '' } });
     res.json({ data: row });
   } catch (err) {
     next(err);
