@@ -513,12 +513,14 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
       <div class="searchbar">
         <input type="text" id="quote-search" placeholder="Buscar por folio, producto o cliente..." oninput="renderQuotesList()">
         <select id="quote-client-filter" onchange="renderQuotesList()" style="min-width:160px;"><option value="">Todos los clientes</option></select>
+        <select id="quote-sort" onchange="setQuoteSort(this.value)" style="min-width:150px;" title="Orden de la lista"><option value="folio-asc">Folio: menor a mayor</option><option value="folio-desc">Folio: mayor a menor</option><option value="fecha-desc">Fecha: más reciente</option><option value="fecha-asc">Fecha: más antigua</option><option value="cliente-asc">Cliente: A → Z</option><option value="producto-asc">Producto: A → Z</option><option value="captura">Orden de captura</option></select>
+        <select id="quote-date-filter" onchange="renderQuotesList()" style="min-width:140px;"><option value="0">Todas las fechas</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="180">Últimos 180 días</option><option value="365">Último año</option></select>
       </div>
       <div class="pill-row" id="quote-status-filters"></div>
       <div class="card crop" style="padding:0;">
         <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
         <table style="padding:6px;">
-          <thead><tr><th>Folio</th><th>Cliente</th><th>Producto</th><th>Fecha</th><th>Estado</th><th></th></tr></thead>
+          <thead><tr><th id="qth-folio" style="cursor:pointer;user-select:none;" onclick="toggleQuoteSort('folio')" title="Ordenar por folio">Folio</th><th id="qth-cliente" style="cursor:pointer;user-select:none;" onclick="toggleQuoteSort('cliente')" title="Ordenar por cliente">Cliente</th><th id="qth-producto" style="cursor:pointer;user-select:none;" onclick="toggleQuoteSort('producto')" title="Ordenar por producto">Producto</th><th id="qth-fecha" style="cursor:pointer;user-select:none;" onclick="toggleQuoteSort('fecha')" title="Ordenar por fecha">Fecha</th><th>Estado</th><th></th></tr></thead>
           <tbody id="quotes-list-body"></tbody>
         </table>
       </div>
@@ -2364,6 +2366,65 @@ function renderQuoteFilters(){
 }
 function setQuoteFilter(v){ quoteStatusFilter=v; renderQuoteFilters(); renderQuotesList(); }
 
+/* ═════ ORDEN Y FILTROS DE LA LISTA DE COTIZACIONES ═════
+   El folio se puede ordenar de más chico a más grande y al revés, y la
+   preferencia se recuerda. 'captura' devuelve el orden original de la base. */
+const QUOTE_SORTS = ['folio-asc','folio-desc','fecha-desc','fecha-asc','cliente-asc','producto-asc','captura'];
+const QUOTE_SORT_KEY = 'arqueta_quote_sort';
+let quoteSort = 'folio-asc';
+try{ const g = localStorage.getItem(QUOTE_SORT_KEY); if(g && QUOTE_SORTS.includes(g)) quoteSort = g; }catch(_){}
+
+function setQuoteSort(v){
+  if(!QUOTE_SORTS.includes(v)) return;
+  quoteSort = v;
+  try{ localStorage.setItem(QUOTE_SORT_KEY, v); }catch(_){}
+  renderQuotesList();
+}
+
+/* Click en el encabezado: el mismo campo alterna, uno nuevo empieza ascendente. */
+function toggleQuoteSort(campo){
+  if(campo === 'folio')    return setQuoteSort(quoteSort==='folio-asc' ? 'folio-desc' : 'folio-asc');
+  if(campo === 'fecha')    return setQuoteSort(quoteSort==='fecha-asc' ? 'fecha-desc' : 'fecha-asc');
+  if(campo === 'cliente')  return setQuoteSort(quoteSort==='cliente-asc' ? 'captura' : 'cliente-asc');
+  if(campo === 'producto') return setQuoteSort(quoteSort==='producto-asc' ? 'captura' : 'producto-asc');
+}
+
+/* Compara respetando los números dentro del texto: AFCOT843 va antes que
+   AFCOT1200, que es justo lo que un orden alfabético simple hace mal. */
+function compararTexto(a, b){
+  const sa = (a===undefined || a===null) ? '' : String(a);
+  const sb = (b===undefined || b===null) ? '' : String(b);
+  return sa.localeCompare(sb, 'es', {numeric:true, sensitivity:'base'});
+}
+
+function ordenarCotizaciones(rows){
+  const copia = rows.slice();
+  const nombre = q => { const c = clientById(q.client_id); return c ? c.name : ''; };
+  switch(quoteSort){
+    case 'folio-asc':    copia.sort((a,b)=>compararTexto(a.quote_number, b.quote_number)); break;
+    case 'folio-desc':   copia.sort((a,b)=>compararTexto(b.quote_number, a.quote_number)); break;
+    case 'fecha-asc':    copia.sort((a,b)=>compararTexto(a.date, b.date) || compararTexto(a.quote_number, b.quote_number)); break;
+    case 'fecha-desc':   copia.sort((a,b)=>compararTexto(b.date, a.date) || compararTexto(a.quote_number, b.quote_number)); break;
+    case 'cliente-asc':  copia.sort((a,b)=>compararTexto(nombre(a), nombre(b)) || compararTexto(a.quote_number, b.quote_number)); break;
+    case 'producto-asc': copia.sort((a,b)=>compararTexto(a.product_name, b.product_name) || compararTexto(a.quote_number, b.quote_number)); break;
+    default: break; /* 'captura': tal como viene de la base */
+  }
+  return copia;
+}
+
+/* La flecha se pinta con textContent, sin HTML armado con datos. */
+function pintarEncabezadosCotizaciones(){
+  const base = {folio:'Folio', cliente:'Cliente', producto:'Producto', fecha:'Fecha'};
+  const activo = quoteSort.split('-')[0];
+  const flecha = quoteSort.endsWith('-desc') ? ' ↓' : ' ↑';
+  Object.keys(base).forEach(k=>{
+    const th = document.getElementById('qth-'+k);
+    if(th) th.textContent = base[k] + (k===activo ? flecha : '');
+  });
+  const sel = document.getElementById('quote-sort');
+  if(sel && sel.value !== quoteSort) sel.value = quoteSort;
+}
+
 function renderQuotesList(){
   renderQuoteFilters();
   // Populate client filter dropdown
@@ -2381,6 +2442,10 @@ function renderQuotesList(){
   });
   if(clientFilter) rows = rows.filter(q=>q.client_id===clientFilter);
   if(quoteStatusFilter!=='todas') rows = rows.filter(q=>q.status===quoteStatusFilter);
+  const diasQ = Number((document.getElementById('quote-date-filter')||{}).value)||0;
+  if(diasQ>0){ const corte = haceDiasMX(diasQ); rows = rows.filter(q=>(q.date||'')>=corte); }
+  rows = ordenarCotizaciones(rows);
+  pintarEncabezadosCotizaciones();
 
   document.getElementById('quotes-list-body').innerHTML = rows.length ? rows.map(q=>{
     const cl = clientById(q.client_id);
