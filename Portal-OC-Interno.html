@@ -1428,6 +1428,10 @@ function marginPct(row){
   return null;
 }
 function clientById(id){ return DB.clients.find(c=>c.id===id); }
+/* Clientes en orden alfabetico (solo para mostrar; no altera el orden guardado en la base) */
+function clientesOrdenados(){
+  return [...(DB.clients||[])].filter(c=>c).sort((a,b)=>compararTexto(a.name, b.name));
+}
 function quoteById(id){ return DB.quotes.find(q=>q.id===id); }
 function tiersForQuote(qid){ return DB.costBreakdown.filter(r=>r.quote_id===qid).sort((a,b)=>a.quantity_tier-b.quantity_tier); }
 function quotesForClient(cid){ return DB.quotes.filter(q=>q.client_id===cid); }
@@ -2197,7 +2201,7 @@ function renderLineChart(filtered){
    ========================================================= */
 function renderClientsList(){
   const term = (document.getElementById('client-search').value||'').toLowerCase();
-  const rows = DB.clients.filter(c=>c.name.toLowerCase().includes(term));
+  const rows = clientesOrdenados().filter(c=>(c.name||'').toLowerCase().includes(term));
   document.getElementById('clients-list-body').innerHTML = rows.length ? rows.map(c=>{
     const n = quotesForClient(c.id).length;
     return `<tr class="rowlink" onclick="openClientDetail('${c.id}')">
@@ -2430,7 +2434,7 @@ function renderQuotesList(){
   // Populate client filter dropdown
   const qcf = document.getElementById('quote-client-filter');
   const curVal = qcf.value;
-  qcf.innerHTML = '<option value="">Todos los clientes</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  qcf.innerHTML = '<option value="">Todos los clientes</option>' + clientesOrdenados().map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   qcf.value = curVal;
 
   const term = (document.getElementById('quote-search').value||'').toLowerCase();
@@ -2463,7 +2467,7 @@ const STANDARD_TIERS = [25000,50000,75000,100000,250000];
 
 function populateClientSelect(selectId){
   const sel = document.getElementById(selectId);
-  sel.innerHTML = DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  sel.innerHTML = clientesOrdenados().map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
 }
 
 function openQuoteModal(prefillClientId){
@@ -3342,7 +3346,7 @@ function renderPOList(){
   // Populate client filter dropdown
   const ocClientSel = document.getElementById('oc-filter-client');
   const currentVal = ocClientSel.value;
-  ocClientSel.innerHTML = '<option value="">Todos los clientes</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  ocClientSel.innerHTML = '<option value="">Todos los clientes</option>' + clientesOrdenados().map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   ocClientSel.value = currentVal;
 
   let cocs = (DB.clientOCs||[]).sort((a,b)=>(b.date_submitted||'').localeCompare(a.date_submitted||''));
@@ -3823,12 +3827,12 @@ function renderComparar(){
   // Populate client dropdown
   const sel = document.getElementById('ctrl-client');
   const curVal = sel.value;
-  sel.innerHTML = '<option value="">Selecciona cliente...</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  sel.innerHTML = '<option value="">Selecciona cliente...</option>' + clientesOrdenados().map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   sel.value = curVal;
   const fsel = document.getElementById('ctrl-f-client');
   if(fsel){
     const fv = fsel.value;
-    fsel.innerHTML = '<option value="">Todos</option>' + DB.clients.map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
+    fsel.innerHTML = '<option value="">Todos</option>' + clientesOrdenados().map(c=>`<option value="${c.name}">${c.name}</option>`).join('');
     fsel.value = fv;
   }
   // Render saved comparisons
@@ -4456,7 +4460,7 @@ function filesClearFilters(){
 function renderArchivos(){
   const sel = document.getElementById('fx-client');
   if(sel && sel.options.length <= 1){
-    sel.innerHTML = '<option value="">Todos</option>' + DB.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+    sel.innerHTML = '<option value="">Todos</option>' + clientesOrdenados().map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
   }
   const list = filesFiltered();
   const wrap = document.getElementById('files-tree');
@@ -4911,7 +4915,7 @@ document.getElementById('notif-emails-list').innerHTML = emails.length ? emails.
 <button class="btn btn-ghost" style="color:var(--brick);font-size:14px;padding:2px 6px;" onclick="removeNotifEmail(${i})">✕</button>
 </div>`).join('') : '<div style="color:var(--muted);font-size:13px;padding:8px 0;">Sin destinatarios configurados.</div>';
 
-document.getElementById('portal-cards').innerHTML = DB.clients.map(c=>{
+document.getElementById('portal-cards').innerHTML = clientesOrdenados().map(c=>{
 const tienePw = !!(c.portal_password_hash || c.portal_password);
 const estadoPw = c.portal_password_hash
 ? 'Guardada como hash — ya no se puede consultar.'
