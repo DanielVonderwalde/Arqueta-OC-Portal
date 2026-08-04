@@ -605,7 +605,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
             <select id="oc-filter-client" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;"><option value="">Todos los clientes</option></select>
             <select id="oc-filter-status" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
-              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="pendiente">Pendiente</option><option value="recibida">Recibida</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
+              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
             </select>
             <select id="oc-filter-days" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
               <option value="0">Todas las fechas</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="120">Últimos 120 días</option><option value="180">Últimos 180 días</option>
@@ -2322,7 +2322,7 @@ function renderClientOCs(){
   const badgeDe = st => st==='facturada'
       ? '<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>'
       : st==='rechazada' ? '<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>'
-      : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Recibida</span>'
+      : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Aceptada</span>'
       : '<span class="badge badge-borrador" style="font-size:10px;">Pendiente</span>';
 
   document.getElementById('cd-ocs-body').innerHTML = list.length ? list.map(o=>{
@@ -3287,6 +3287,7 @@ function renderPOList(){
   const fDays = Number(document.getElementById('oc-filter-days').value)||0;
   if(fClient) cocs = cocs.filter(o=>o.client_id===fClient);
   if(fStatus==='__alerta') cocs = cocs.filter(o=>revisarOC(o).nivel!=='ok');
+  else if(fStatus==='__autorizar') cocs = cocs.filter(o=>ocSolicitudPendiente(o));
   else if(fStatus) cocs = cocs.filter(o=>o.status===fStatus);
   if(fDays>0){ const cutoff = haceDiasMX(fDays); cocs = cocs.filter(o=>o.date_submitted>=cutoff); }
 
@@ -3323,18 +3324,36 @@ function renderPOList(){
         }).join('');
         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
-        const statusBadge = o.status==='recibida' ? '<span class="badge badge-match-yes">Recibida</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
+        const solPend = ocSolicitudPendiente(o);
+        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
+        /* En revisión: el asociado ya pidió el cambio y falta que lo autorice el admin. */
+        const statusBadge = solPend
+          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>'
+          : badgeBase;
         const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
         const alertaBadge = chequeo.nivel==='bad'
           ? '<div style="margin-top:4px;"><span class="badge badge-match-no" style="font-size:10px;">⛔ REVISAR PRECIO</span></div>'
           : chequeo.nivel==='warn'
           ? '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⚠️ Revisar</span></div>' : '';
         const fechaDeseada = o.fecha_deseada ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">Entrega: ${o.fecha_deseada}</div>` : '';
-        // Editar y borrar OCs: solo admin. El asociado sí puede cambiar el estado.
+        // Editar y borrar OCs: solo admin. Y todo cambio de estatus lo autoriza el admin.
         const esAdmin = currentRole === 'admin';
         const editBtn = esAdmin ? `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" onclick="openPOModal('${o.id}')">✏</button>` : '';
         const delBtn  = esAdmin ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : '';
-        const actions = o.status==='pendiente' ? `<div style="display:flex;gap:4px;">${editBtn}<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>${delBtn}</div>` : `<div style="display:flex;gap:4px;">${editBtn}${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada y archivar" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>${delBtn}</div>`;
+        /* Todo cambio de estatus pasa por el administrador. Si ya hay una
+           solicitud, el admin la autoriza o la descarta; el asociado solo ve
+           que está en revisión. */
+        let ocBotones;
+        if(solPend){
+          ocBotones = esAdmin
+            ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Autorizar: ${OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion}" onclick="autorizarOC('${o.id}')">✓ Autorizar</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" title="No autorizar la solicitud" onclick="rechazarSolicitudOC('${o.id}')">✗</button>`
+            : `<span style="font-size:10px;color:var(--muted);">Esperando autorización</span>`;
+        } else if(o.status==='pendiente'){
+          ocBotones = `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" title="${esAdmin?'Aceptar la OC':'Pedir autorización para aceptar'}" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" title="${esAdmin?'Rechazar la OC':'Pedir autorización para rechazar'}" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>`;
+        } else {
+          ocBotones = `${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar'}" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
+        }
+        const actions = `<div style="display:flex;gap:4px;">${editBtn}${ocBotones}${delBtn}</div>`;
         html += `<tr style="${chequeo.nivel==='bad'?'box-shadow:inset 4px 0 0 #A63A3A;':chequeo.nivel==='warn'?'box-shadow:inset 4px 0 0 #C08A3E;':''}"><td class="mono">${o.oc_number}${urgentBadge}${alertaBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
       });
     }
@@ -3386,22 +3405,125 @@ function renderOCArchivo(list){
 }
 
 /* Marca una OC como facturada y la manda al archivo */
+/* Facturar también lo autoriza el administrador. */
 function marcarFacturada(id){
   const oc = (DB.clientOCs||[]).find(o=>o.id===id);
   if(!oc) return;
+  if(!esAdminActual()){ setClientOCStatus(id, 'facturada'); return; }
   const num = prompt('Número de factura para la OC ' + oc.oc_number + ' (opcional):', oc.factura_numero||'');
   if(num===null) return;
-  oc.factura_numero = num.trim();
-  oc.factura_fecha = hoyMX();
-  oc.status = 'facturada';
-  saveData(); renderPOList(); renderInicio();
-  if(currentClientId) renderClientOCs();
-  showToast('OC ' + oc.oc_number + ' facturada y archivada');
+  setClientOCStatus(id, 'facturada', {factura_numero:num.trim(), factura_fecha:hoyMX()});
 }
-function setClientOCStatus(id, newStatus){
+/* ══════════ AUTORIZACIÓN DEL ADMINISTRADOR ══════════
+   Ningún cambio de estatus de una OC de cliente surte efecto si no lo
+   autoriza un administrador: aceptar, rechazar, facturar y regresar a
+   pendiente. El asociado no mueve el estatus; deja una solicitud en
+   oc.autorizacion_pendiente y la orden se queda como estaba, así que el
+   cliente sigue viendo 'Pendiente' hasta que el admin la acepte.
+   Nada se pierde: cada solicitud y cada decisión se agregan a
+   oc.autorizaciones, que solo crece.                                  */
+const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', facturada:'Facturar', rechazada:'Rechazar'};
+
+function esAdminActual(){ return currentRole === 'admin'; }
+
+function ocSolicitudPendiente(o){
+  const s = o && o.autorizacion_pendiente;
+  return (s && s.accion && OC_ACCION_ETIQUETA[s.accion]) ? s : null;
+}
+
+function ocRegistrarAutorizacion(oc, entrada){
+  if(!Array.isArray(oc.autorizaciones)) oc.autorizaciones = [];
+  oc.autorizaciones.push(entrada);
+}
+
+function ocAplicarEstatus(oc, accion, extra){
+  const e = extra || {};
+  oc.status = accion;
+  if(accion === 'facturada'){
+    oc.factura_numero = e.factura_numero !== undefined ? e.factura_numero : (oc.factura_numero||'');
+    oc.factura_fecha  = e.factura_fecha || oc.factura_fecha || hoyMX();
+  }
+  oc.statusUpdatedAt = new Date().toISOString();
+  oc.statusUpdatedBy = usuarioActual();
+  oc.autorizacion_pendiente = null;
+}
+
+function ocRefrescar(){
+  saveData(); renderPOList();
+  try{ renderInicio(); }catch(_){}
+  if(currentClientId) renderClientOCs();
+}
+
+/* El asociado pide, el administrador aplica: un solo camino para los dos. */
+function setClientOCStatus(id, newStatus, extra){
   if(!DB.clientOCs) return;
   const oc = DB.clientOCs.find(o=>o.id===id);
-  if(oc){ oc.status = newStatus; saveData(); renderPOList(); showToast('Estado actualizado: '+newStatus); }
+  if(!oc) return;
+  const etiqueta = OC_ACCION_ETIQUETA[newStatus] || newStatus;
+  const ahora = new Date().toISOString();
+
+  if(!esAdminActual()){
+    const nota = prompt('Esta acción la tiene que autorizar el administrador.\n\nSolicitud: '+etiqueta.toLowerCase()+' la OC '+oc.oc_number+'\n\nNota para el administrador (opcional):', '');
+    if(nota===null) return;
+    oc.autorizacion_pendiente = {
+      accion: newStatus,
+      desde: oc.status || 'pendiente',
+      motivo: nota.trim(),
+      factura_numero: (extra && extra.factura_numero) || '',
+      solicitadoPor: usuarioActual(),
+      solicitadoEn: ahora
+    };
+    ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'solicitada', por:usuarioActual(), fecha:ahora, motivo:nota.trim()});
+    ocRefrescar();
+    showToast('Solicitud enviada al administrador — la OC sigue como '+(oc.status||'pendiente'));
+    return;
+  }
+
+  ocAplicarEstatus(oc, newStatus, extra);
+  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora});
+  ocRefrescar();
+  showToast('OC '+oc.oc_number+': '+etiqueta.toLowerCase()+' — autorizado');
+}
+
+/* El administrador resuelve la solicitud del asociado. */
+function autorizarOC(id){
+  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
+  if(!oc) return;
+  if(!esAdminActual()){ showToast('Solo el administrador puede autorizar'); return; }
+  const sol = ocSolicitudPendiente(oc);
+  if(!sol){ showToast('Esa OC no tiene ninguna solicitud pendiente'); return; }
+  const etiqueta = OC_ACCION_ETIQUETA[sol.accion] || sol.accion;
+  const extra = {};
+  if(sol.accion === 'facturada'){
+    const num = prompt('Autorizar facturación de la OC '+oc.oc_number+'.\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):'')+'\n\nNúmero de factura (opcional):', sol.factura_numero || oc.factura_numero || '');
+    if(num===null) return;
+    extra.factura_numero = num.trim();
+    extra.factura_fecha = hoyMX();
+  } else {
+    if(!confirm('¿Autorizar «'+etiqueta+'» para la OC '+oc.oc_number+'?\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
+  }
+  const ahora = new Date().toISOString();
+  ocAplicarEstatus(oc, sol.accion, extra);
+  ocRegistrarAutorizacion(oc, {accion:sol.accion, resultado:'autorizada', solicitadoPor:sol.solicitadoPor||'', por:usuarioActual(), fecha:ahora, motivo:sol.motivo||''});
+  ocRefrescar();
+  showToast('OC '+oc.oc_number+' — '+etiqueta.toLowerCase()+': autorizado');
+}
+
+/* No autorizar: la solicitud se descarta y la OC se queda como estaba. */
+function rechazarSolicitudOC(id){
+  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
+  if(!oc) return;
+  if(!esAdminActual()){ showToast('Solo el administrador puede autorizar'); return; }
+  const sol = ocSolicitudPendiente(oc);
+  if(!sol) return;
+  const etiqueta = OC_ACCION_ETIQUETA[sol.accion] || sol.accion;
+  const motivo = prompt('No autorizar «'+etiqueta+'» para la OC '+oc.oc_number+'.\n\nSolicitó: '+(sol.solicitadoPor||'—')+'\n\nMotivo (opcional):', '');
+  if(motivo===null) return;
+  const ahora = new Date().toISOString();
+  ocRegistrarAutorizacion(oc, {accion:sol.accion, resultado:'no_autorizada', solicitadoPor:sol.solicitadoPor||'', por:usuarioActual(), fecha:ahora, motivo:motivo.trim()});
+  oc.autorizacion_pendiente = null;
+  ocRefrescar();
+  showToast('Solicitud no autorizada — la OC sigue como '+(oc.status||'pendiente'));
 }
 function deleteClientOC(id){
   const oc = (DB.clientOCs||[]).find(o=>o && o.id===id) || buscarEnTodos('clientOCs', id);
