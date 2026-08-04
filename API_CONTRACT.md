@@ -176,13 +176,16 @@ documentos con su id.
 | GET /client | todos (con alcance) | ordenes de compra de clientes |
 | GET /client/:id | todos (con alcance) | detalle |
 | POST /client | cliente o interno | alta de OC; valida que cada cotizacion sea de esa empresa |
-| PATCH /client/:id/status | interno | pendiente, recibida, facturada, rechazada |
+| PATCH /client/:id/status | admin aplica, asociado solicita | pendiente, recibida, facturada, rechazada |
+| POST /client/:id/authorization | SOLO admin | autoriza o descarta la solicitud del asociado |
 | GET /purchase | interno | ordenes internas |
 | POST /purchase | interno | alta contra una cotizacion |
 | PATCH /purchase/:id | interno | edicion |
 
 Marcar como facturada exige factura_numero. El cliente nunca puede cambiar el
 estatus ni los campos de factura.
+
+Ningun cambio de estatus lo decide el asociado: ver el punto 10.
 
 ### 4.5 Documentos  (/v1/documents)
 
@@ -480,3 +483,60 @@ Probado contra los datos reales en memoria, sin escribir en produccion: desactiv
 saco 1 cliente, 3 cotizaciones, 1 orden y 16 filas de costo de las vistas activas, mientras
 que el guardado simulado seguia conservando los 30 clientes, 12 cotizaciones y 54 filas.
 Reactivar devuelve el registro a su lugar. La base quedo intacta: 0 registros desactivados.
+
+---
+
+## 10. El administrador autoriza todo cambio de estatus (2026-08-03)
+
+### 10.1 La regla
+
+Aceptar, rechazar, facturar y regresar a pendiente una OC de cliente son
+decisiones del administrador. El asociado puede pedirlas, no ejecutarlas.
+Antes `PATCH /v1/orders/client/:id/status` estaba protegido solo con
+`requireInternal`: admin y asociado tenian exactamente el mismo poder, y en
+el panel interno los botones de aceptar y rechazar respondian igual para los
+dos. El cliente veia su OC como aceptada sin que nadie con permiso lo hubiera
+decidido.
+
+### 10.2 Como queda en la API
+
+| Quien llama | Que pasa | Respuesta |
+| --- | --- | --- |
+| admin | el estatus cambia de inmediato | 200 |
+| asociado | queda una solicitud en `autorizacion_pendiente`, el estatus NO se toca | 202 |
+
+`POST /v1/orders/client/:id/authorization` (solo admin) resuelve la
+solicitud. Body: `{ decision: 'autorizar' | 'no_autorizar', motivo?,
+factura_numero?, factura_fecha? }`. Autorizar aplica la accion pedida;
+no autorizar borra la solicitud y deja la orden como estaba. Si no hay
+solicitud pendiente responde 409 `conflict`.
+
+Autorizar una facturacion exige factura_numero, igual que antes.
+
+### 10.3 Campos nuevos en la orden
+
+| Campo | Contenido |
+| --- | --- |
+| autorizacion_pendiente | `{ accion, desde, motivo, factura_numero, solicitadoPor, solicitadoEn }`, o ausente si no hay nada pendiente |
+| autorizaciones | lista que solo crece: una entrada por cada solicitud y por cada decision, con `resultado` en `solicitada`, `autorizada` o `no_autorizada` |
+
+Ningun campo se elimina y ningun estatus se sobrescribe sin quedar
+registrado: la solicitud vive en `autorizacion_pendiente` mientras espera,
+el historial se agrega a `autorizaciones` y la accion tambien se escribe en
+el auditLog (`client_oc.status_request`, `client_oc.status`,
+`client_oc.authorization`). El enum de estatus no cambia, asi que la version
+de la API sigue siendo v1 y los datos que ya existen se leen igual.
+
+### 10.4 Como se ve en el portal interno
+
+El asociado pulsa los mismos botones y el portal le pide una nota para el
+administrador. La OC se queda en su estatus y aparece marcada En revision con
+la accion pedida y quien la pidio. El administrador ve en esa misma fila
+Autorizar o descartar, y el filtro Por autorizar de la vista Ordenes de
+compra lista solo lo que espera su decision. El estatus recibida se muestra
+como Aceptada, de modo que nada dice aceptada antes de que el admin lo
+autorice.
+
+Mientras el admin no autorice, el portal del cliente sigue mostrando la orden
+como Pendiente: el aviso no es por correo, la autorizacion se hace dentro del
+portal.
