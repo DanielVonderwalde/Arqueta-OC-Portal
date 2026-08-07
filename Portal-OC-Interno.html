@@ -5141,5 +5141,496 @@ function abrirDesactivados(){
 })();
 
 </script>
+
+<!-- ===================== CRM · Recompra =====================
+     Pestana de seguimiento: track record mensual de pedidos por
+     producto, proyeccion del proximo mes y alertas de recompra.
+     Modulo autocontenido, solo lectura sobre DB.
+     ========================================================== -->
+<script>
+/* ===================== CRM · Recompra =====================
+   Track record mensual por producto + proyección de pedido.
+   Módulo autocontenido: crea su propio nav item, su vista y
+   se engancha a goTo()/renderAll(). No modifica datos.
+   ========================================================== */
+(function(){
+'use strict';
+if(window.__crmInit) return; window.__crmInit=true;
+
+var MESES=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+var EST={ok:{t:'Al día',c:'crm-ok'},parcial:{t:'Pedido parcial',c:'crm-parcial'},pendiente:{t:'Toca pedir',c:'crm-pend'},atrasado:{t:'Atrasado',c:'crm-atr'},inactivo:{t:'Inactivo',c:'crm-ina'},ventana:{t:'En ventana',c:'crm-vent'}};
+var RANK={ok:0,ventana:1,pendiente:2,parcial:3,atrasado:4,inactivo:5};
+var S={tab:'producto',filtro:'todos',q:'',cliente:'',hist:12,estados:'validas',ajustar:true,abierto:{}};
+var C={items:[],meses:[],mesActual:''};
+
+/* ---------- utilidades ---------- */
+function getDB(){ try{ return DB; }catch(e){ return null; } }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function nf(n){ return (Math.round(Number(n)||0)).toLocaleString('es-MX'); }
+function mf(n){ return '$'+(Math.round(Number(n)||0)).toLocaleString('es-MX'); }
+function pad2(n){ return (n<10?'0':'')+n; }
+function mkey(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1); }
+function mAdd(k,n){ var p=k.split('-'); var d=new Date(Number(p[0]),Number(p[1])-1+n,1); return mkey(d); }
+function mLabel(k){ var p=k.split('-'); return MESES[Number(p[1])-1]+' '+String(p[0]).slice(2); }
+function dParse(s){ var p=String(s).slice(0,10).split('-'); return new Date(Number(p[0]),Number(p[1])-1,Number(p[2])); }
+function dLabel(s){ if(!s) return '—'; var p=String(s).slice(0,10).split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function dias(a,b){ return Math.round((b-a)/86400000); }
+function addDias(s,n){ var d=dParse(s); d.setDate(d.getDate()+n); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function suma(a){ var t=0; for(var i=0;i<a.length;i++) t+=a[i]; return t; }
+function toast(m){ if(typeof showToast==='function'){ try{ showToast(m); }catch(e){} } }
+function nombreCliente(id){ var db=getDB(); if(db&&db.clients){ for(var i=0;i<db.clients.length;i++) if(db.clients[i].id===id) return db.clients[i].name||id; } return id||'—'; }
+
+/* ---------- fuente de datos (sólo lectura) ---------- */
+function fuenteDefault(){
+  var db=getDB(); if(!db) return [];
+  var a=(db.clientOCs||[]).slice(), b=(db.purchaseOrders||[]);
+  for(var i=0;i<b.length;i++) a.push(b[i]);
+  return a;
+}
+window.crmFuenteOC=fuenteDefault;
+
+function fechaOC(o){
+  var s=o.date_submitted||o.date||o.fecha||o.created_at||'';
+  if(typeof s==='number'){ var dd=new Date(s); return isNaN(dd)?null:(dd.getFullYear()+'-'+pad2(dd.getMonth()+1)+'-'+pad2(dd.getDate())); }
+  s=String(s);
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  if(/^\d{2}\/\d{2}\/\d{4}/.test(s)){ var p=s.slice(0,10).split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
+  var d=new Date(s); return isNaN(d)?null:(d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()));
+}
+function pasaEstado(st){
+  if(S.estados==='todas') return true;
+  if(S.estados==='cerradas') return st==='recibida'||st==='facturada';
+  return st!=='rechazada'&&st!=='cancelada'&&st!=='borrador';
+}
+
+/* ---------- cálculo ---------- */
+function calcular(){
+  var raw=(window.crmFuenteOC||fuenteDefault)()||[];
+  var vistos={}, regs=[], i, j, z;
+  for(i=0;i<raw.length;i++){
+    var o=raw[i]||{};
+    var f=fechaOC(o); if(!f) continue;
+    var st=String(o.status||o.estado||'pendiente').toLowerCase();
+    if(!pasaEstado(st)) continue;
+    var cid=o.client_id||o.clientId||'';
+    var num=String(o.oc_number||o.po_number||o.numero||o.id||'');
+    var k=cid+'|'+num+'|'+f; if(vistos[k]) continue; vistos[k]=1;
+    var lines=o.lines||o.items||[];
+    for(j=0;j<lines.length;j++){
+      var l=lines[j]||{};
+      var qty=Number(l.quantity!=null?l.quantity:(l.qty!=null?l.qty:l.cantidad))||0;
+      if(qty<=0) continue;
+      var pu=Number(l.unit_price!=null?l.unit_price:(l.price!=null?l.price:l.precio))||0;
+      var cod=String(l.codigo||l.code||l.sku||'').trim();
+      var prod=String(l.product||l.producto||l.description||'').trim();
+      if(!cod&&!prod) continue;
+      regs.push({cid:cid,fecha:f,mes:f.slice(0,7),cod:cod,prod:prod||cod,qty:qty,pu:pu});
+    }
+  }
+  var hoy=new Date(); hoy.setHours(0,0,0,0);
+  var mesActual=mkey(hoy);
+  var meses=[]; for(var m=S.hist;m>=1;m--) meses.push(mAdd(mesActual,-m));
+  var g={};
+  for(i=0;i<regs.length;i++){
+    var r=regs[i];
+    var key=r.cid+'||'+(r.cod?r.cod.toUpperCase():r.prod.toUpperCase());
+    var s=g[key];
+    if(!s) s=g[key]={cid:r.cid,cliente:nombreCliente(r.cid),cod:r.cod,prod:r.prod,mm:{},regs:[]};
+    if(!s.cod&&r.cod) s.cod=r.cod;
+    if(r.prod&&r.prod.length>s.prod.length) s.prod=r.prod;
+    s.mm[r.mes]=(s.mm[r.mes]||0)+r.qty;
+    s.regs.push(r);
+  }
+  var items=[], keys=Object.keys(g);
+  for(i=0;i<keys.length;i++){
+    s=g[keys[i]];
+    s.regs.sort(function(a,b){ return a.fecha<b.fecha?-1:(a.fecha>b.fecha?1:0); });
+    s.pu=0; for(z=s.regs.length-1;z>=0;z--){ if(s.regs[z].pu){ s.pu=s.regs[z].pu; break; } }
+    s.ultima=s.regs[s.regs.length-1].fecha;
+    s.dias=dias(dParse(s.ultima),hoy);
+    var uf=[]; for(z=0;z<s.regs.length;z++) if(uf.indexOf(s.regs[z].fecha)<0) uf.push(s.regs[z].fecha);
+    s.nPedidos=uf.length;
+    if(uf.length>=2){ var df=[]; for(z=1;z<uf.length;z++) df.push(dias(dParse(uf[z-1]),dParse(uf[z]))); s.frec=Math.round(suma(df)/df.length); } else s.frec=0;
+    s.serie=[]; for(z=0;z<meses.length;z++) s.serie.push(s.mm[meses[z]]||0);
+    s.actual=s.mm[mesActual]||0;
+    s.total=suma(s.serie);
+    var i0=-1; for(z=0;z<s.serie.length;z++){ if(s.serie[z]>0){ i0=z; break; } }
+    var b0=(i0<0?0:i0), span=(i0<0?0:s.serie.length-i0);
+    s.conPedido=0; for(z=0;z<s.serie.length;z++) if(s.serie[z]>0) s.conPedido++;
+    s.promMensual=span>0?s.total/span:0;
+    s.promActivo=s.conPedido>0?s.total/s.conPedido:0;
+    var nu=0,de=0; for(z=b0;z<s.serie.length;z++){ var w=z-b0+1; nu+=s.serie[z]*w; de+=w; }
+    s.pond=de>0?nu/de:0;
+    var u3=suma(s.serie.slice(-3))/3, p3=suma(s.serie.slice(-6,-3))/3;
+    s.tend=p3>0?((u3-p3)/p3):(u3>0?1:0);
+    var base=s.pond>0?s.pond:s.promMensual;
+    var fac=S.ajustar?Math.max(0.7,Math.min(1.3,1+s.tend)):1;
+    s.proy=Math.round(base*fac);
+    s.proyVal=s.proy*s.pu;
+    s.falta=Math.max(0,s.proy-s.actual);
+    s.faltaVal=s.falta*s.pu;
+    var ufw=[]; for(z=0;z<uf.length;z++) if(meses.indexOf(uf[z].slice(0,7))>=0) ufw.push(uf[z]);
+    s.pedidosWin=ufw.length;
+    s.tamPedido=s.pedidosWin>0?Math.round(s.total/s.pedidosWin):0;
+    s.prox=addDias(s.ultima,s.frec>0?s.frec:30);
+    s.atraso=dias(dParse(s.prox),hoy);
+    if(s.total<=0&&s.actual<=0) s.estado='inactivo';
+    else if(s.dias>150) s.estado='inactivo';
+    else if(s.actual>0&&s.falta<=Math.round(s.proy*0.15)) s.estado='ok';
+    else if(s.actual>0) s.estado='parcial';
+    else if(s.atraso>15) s.estado='atrasado';
+    else if(s.atraso>0) s.estado='pendiente';
+    else s.estado='ventana';
+    items.push(s);
+  }
+  items.sort(function(a,b){ return (b.faltaVal-a.faltaVal)||(b.proyVal-a.proyVal); });
+  return {items:items,meses:meses,mesActual:mesActual};
+}
+
+function filtrados(){
+  var q=S.q.toLowerCase().trim(), out=[];
+  for(var i=0;i<C.items.length;i++){
+    var s=C.items[i];
+    if(S.cliente&&s.cid!==S.cliente) continue;
+    if(q&&(s.cliente+' '+s.cod+' '+s.prod).toLowerCase().indexOf(q)<0) continue;
+    if(S.filtro==='falta'&&['parcial','pendiente','atrasado'].indexOf(s.estado)<0) continue;
+    if(S.filtro==='atrasado'&&s.estado!=='atrasado') continue;
+    if(S.filtro==='inactivo'&&s.estado!=='inactivo') continue;
+    if(S.filtro==='ok'&&s.estado!=='ok') continue;
+    out.push(s);
+  }
+  return out;
+}
+function porCliente(){
+  var f=filtrados(), g={}, k;
+  for(var i=0;i<f.length;i++){
+    var s=f[i], a=g[s.cid];
+    if(!a) a=g[s.cid]={cid:s.cid,cliente:s.cliente,n:0,prom:0,proy:0,actual:0,falta:0,ultima:'',dias:0,peor:0,estado:'ok',prods:[]};
+    a.n++; a.prom+=s.promMensual*s.pu; a.proy+=s.proyVal; a.actual+=s.actual*s.pu; a.falta+=s.faltaVal; a.prods.push(s);
+    if(!a.ultima||s.ultima>a.ultima){ a.ultima=s.ultima; a.dias=s.dias; }
+    if(RANK[s.estado]>a.peor){ a.peor=RANK[s.estado]; a.estado=s.estado; }
+  }
+  var arr=[]; for(k in g) arr.push(g[k]);
+  arr.sort(function(a,b){ return (b.falta-a.falta)||(b.proy-a.proy); });
+  return arr;
+}
+
+/* ---------- render ---------- */
+function spark(s){
+  var mx=1; for(var i=0;i<s.serie.length;i++) if(s.serie[i]>mx) mx=s.serie[i];
+  var h='<div class="crm-spark">';
+  for(i=0;i<s.serie.length;i++){
+    var v=s.serie[i], pc=Math.round(v/mx*100);
+    h+='<i style="height:'+(v>0?Math.max(10,pc):3)+'%" title="'+esc(mLabel(C.meses[i])+': '+nf(v)+' pzas')+'"></i>';
+  }
+  h+='<i class="on" style="height:'+(s.actual>0?Math.max(10,Math.round(s.actual/mx*100)):3)+'%" title="'+esc(mLabel(C.mesActual)+' (en curso): '+nf(s.actual)+' pzas')+'"></i>';
+  return h+'</div>';
+}
+function badge(e){ var d=EST[e]||EST.ventana; return '<span class="badge crm-b '+d.c+'">'+d.t+'</span>'; }
+function tendHTML(t){
+  if(!isFinite(t)||t===0) return '<span class="small-note">sin cambio</span>';
+  var p=Math.round(t*100);
+  if(p>200) p=200;
+  return '<span class="small-note '+(p>=0?'crm-up':'crm-down')+'">'+(p>=0?'▲ +':'▼ ')+p+'%</span>';
+}
+function statCard(num,lbl){
+  return '<div class="stat-card crop"><div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div><div class="num">'+num+'</div><div class="lbl">'+lbl+'</div></div>';
+}
+function pintarStats(){
+  var f=filtrados(), pz=0, val=0, fv=0, cl={}, ina={};
+  for(var i=0;i<f.length;i++){
+    var s=f[i];
+    if(s.estado!=='inactivo'){ pz+=s.proy; val+=s.proyVal; }
+    if(s.falta>0&&s.estado!=='inactivo'&&s.estado!=='ventana'){ fv+=s.faltaVal; cl[s.cid]=1; }
+    if(s.estado==='inactivo') ina[s.cid]=1;
+  }
+  var e=document.getElementById('crm-stats'); if(!e) return;
+  e.innerHTML=statCard(nf(f.length),'Productos rastreados')
+    +statCard(nf(pz),'Piezas proy. próx. mes')
+    +statCard(mf(val),'Valor proyectado')
+    +statCard(mf(fv),'Por pedir este mes')
+    +statCard(nf(Object.keys(ina).length),'Clientes inactivos');
+  var sub=document.getElementById('crm-sub');
+  if(sub) sub.textContent='Historial de '+S.hist+' meses · mes en curso: '+mLabel(C.mesActual)+' · '+Object.keys(cl).length+' clientes con faltante';
+}
+function vacio(msg){ return '<div class="empty"><div class="big">◷</div>'+esc(msg)+'</div>'; }
+
+function tablaProducto(){
+  var f=filtrados();
+  if(!f.length) return vacio('No hay órdenes que coincidan con los filtros.');
+  var h='<div class="crm-scroll"><table><thead><tr><th>Cliente</th><th>Producto</th><th>Historial '+S.hist+'m</th><th>Prom/mes</th><th>Proyección próx.</th><th>Este mes</th><th>Falta</th><th>Último pedido</th><th>Frecuencia</th><th>Estado</th></tr></thead><tbody>';
+  for(var i=0;i<f.length;i++){
+    var s=f[i], k=s.cid+'||'+s.cod+'||'+i;
+    h+='<tr class="crm-row" data-k="'+esc(k)+'" data-i="'+i+'">'
+      +'<td>'+esc(s.cliente)+'</td>'
+      +'<td><div style="font-weight:600">'+esc(s.prod)+'</div>'+(s.cod?'<div class="small-note mono">'+esc(s.cod)+'</div>':'')+'</td>'
+      +'<td>'+spark(s)+'</td>'
+      +'<td><b>'+nf(s.promMensual)+'</b><div>'+tendHTML(s.tend)+'</div></td>'
+      +'<td><b>'+nf(s.proy)+'</b><div class="small-note">'+mf(s.proyVal)+'</div></td>'
+      +'<td>'+(s.actual>0?nf(s.actual):'<span class="small-note">—</span>')+'</td>'
+      +'<td>'+(s.falta>0?'<b>'+nf(s.falta)+'</b><div class="small-note">'+mf(s.faltaVal)+'</div>':'<span class="small-note">—</span>')+'</td>'
+      +'<td>'+dLabel(s.ultima)+'<div class="small-note">hace '+s.dias+' d</div></td>'
+      +'<td>'+(s.frec>0?'c/'+s.frec+' d':'<span class="small-note">1 pedido</span>')+'</td>'
+      +'<td>'+badge(s.estado)+'</td></tr>';
+    if(S.abierto[k]) h+='<tr class="crm-det"><td colspan="10">'+detalle(s)+'</td></tr>';
+  }
+  return h+'</tbody></table></div>';
+}
+function detalle(s){
+  var h='<div class="crm-mm">';
+  for(var i=0;i<C.meses.length;i++) h+='<div><div class="m">'+mLabel(C.meses[i])+'</div><div class="q">'+(s.serie[i]?nf(s.serie[i]):'—')+'</div></div>';
+  h+='<div class="cur"><div class="m">'+mLabel(C.mesActual)+' (en curso)</div><div class="q">'+(s.actual?nf(s.actual):'—')+'</div></div>';
+  h+='<div class="cur" style="border-style:dashed"><div class="m">Proyección</div><div class="q">'+nf(s.proy)+'</div></div></div>';
+  h+='<div class="crm-facts">'
+    +'<span><b>Total '+S.hist+'m:</b> '+nf(s.total)+' pzas</span>'
+    +'<span><b>Pedidos:</b> '+s.pedidosWin+' en el periodo · '+nf(s.tamPedido)+' pzas por pedido</span>'
+    +'<span><b>Meses con pedido:</b> '+s.conPedido+' de '+S.hist+'</span>'
+    +'<span><b>Precio unitario:</b> '+(s.pu?('$'+s.pu.toFixed(2)):'—')+'</span>'
+    +'<span><b>Próximo pedido esperado:</b> '+dLabel(s.prox)+(s.atraso>0?(' <span class="crm-down">('+s.atraso+' d de atraso)</span>'):'')+'</span>'
+    +'</div>'
+    +'<div class="small-note" style="margin-top:8px">Proyección = promedio móvil ponderado de los meses con historial (más peso a los meses recientes)'+(S.ajustar?', ajustado por la tendencia de los últimos 3 meses contra los 3 previos':'')+'. El mes en curso no entra en el promedio.</div>';
+  return h;
+}
+function tablaCliente(){
+  var f=porCliente();
+  if(!f.length) return vacio('No hay clientes que coincidan con los filtros.');
+  var h='<div class="crm-scroll"><table><thead><tr><th>Cliente</th><th>Productos</th><th>Prom mensual</th><th>Proyección próx.</th><th>Pedido este mes</th><th>Falta</th><th>Última OC</th><th>Días</th><th>Estado</th><th></th></tr></thead><tbody>';
+  for(var i=0;i<f.length;i++){
+    var a=f[i];
+    h+='<tr><td style="font-weight:600">'+esc(a.cliente)+'</td>'
+      +'<td>'+a.n+'</td>'
+      +'<td>'+mf(a.prom)+'</td>'
+      +'<td><b>'+mf(a.proy)+'</b></td>'
+      +'<td>'+(a.actual>0?mf(a.actual):'<span class="small-note">—</span>')+'</td>'
+      +'<td>'+(a.falta>0?'<b>'+mf(a.falta)+'</b>':'<span class="small-note">—</span>')+'</td>'
+      +'<td>'+dLabel(a.ultima)+'</td>'
+      +'<td>'+a.dias+' d</td>'
+      +'<td>'+badge(a.estado)+'</td>'
+      +'<td style="text-align:right"><button class="btn btn-ghost" data-cid="'+esc(a.cid)+'">Copiar seguimiento</button></td></tr>';
+  }
+  return h+'</tbody></table></div>';
+}
+function tablaAlertas(){
+  var f=porCliente().filter(function(a){ return a.falta>0||a.estado==='atrasado'||a.estado==='inactivo'; });
+  if(!f.length) return vacio('Sin alertas: todos los clientes van al corriente con su promedio.');
+  var h='<div class="small-note" style="margin-bottom:14px">Ordenado por monto pendiente de pedir. El botón copia un mensaje listo para enviarle al cliente.</div>';
+  for(var i=0;i<f.length;i++){
+    var a=f[i];
+    h+='<div class="crm-alert"><div class="crm-alert-head"><div><h3>'+esc(a.cliente)+'</h3><div class="small-note">Última OC '+dLabel(a.ultima)+' · hace '+a.dias+' días · '+a.n+(a.n===1?' producto':' productos')+'</div></div>'
+      +'<div style="text-align:right"><div class="crm-money">'+mf(a.falta)+'</div><div class="lbl">Falta pedir</div>'
+      +'<button class="btn btn-secondary" style="margin-top:8px" data-cid="'+esc(a.cid)+'">Copiar seguimiento</button></div></div><ul class="crm-ul">';
+    var ps=a.prods.slice().sort(function(x,y){ return y.faltaVal-x.faltaVal; });
+    for(var j=0;j<ps.length;j++){
+      var s=ps[j];
+      if(!(s.falta>0||s.estado==='atrasado'||s.estado==='inactivo')) continue;
+      h+='<li>'+badge(s.estado)+' <b>'+esc(s.prod)+'</b>'+(s.cod?' <span class="mono small-note">'+esc(s.cod)+'</span>':'')
+        +' — promedio '+nf(s.promMensual)+' pzas/mes, este mes '+nf(s.actual)+' pzas'
+        +(s.falta>0?(', faltan <b>'+nf(s.falta)+'</b> pzas ('+mf(s.faltaVal)+')'):'')
+        +(s.frec>0?('. Suele pedir cada '+s.frec+' días; último '+dLabel(s.ultima)):'. Único pedido el '+dLabel(s.ultima))+'</li>';
+    }
+    h+='</ul></div>';
+  }
+  return h;
+}
+function pintarPanel(){
+  var e=document.getElementById('crm-panel'); if(!e) return;
+  if(S.tab==='cliente') e.innerHTML=tablaCliente();
+  else if(S.tab==='alertas') e.innerHTML=tablaAlertas();
+  else e.innerHTML=tablaProducto();
+}
+function pintarSelectClientes(){
+  var sel=document.getElementById('crm-cliente'); if(!sel) return;
+  var db=getDB(), cs=(db&&db.clients)?db.clients.slice():[];
+  cs.sort(function(a,b){ return String(a.name||'').localeCompare(String(b.name||'')); });
+  var h='<option value="">Todos los clientes</option>';
+  for(var i=0;i<cs.length;i++) h+='<option value="'+esc(cs[i].id)+'">'+esc(cs[i].name||cs[i].id)+'</option>';
+  sel.innerHTML=h; sel.value=S.cliente;
+}
+function renderCRM(){
+  if(!document.getElementById('view-crm')) return;
+  try{ C=calcular(); }catch(e){ console.error('CRM:',e); C={items:[],meses:[],mesActual:mkey(new Date())}; }
+  pintarSelectClientes(); pintarStats(); pintarPanel();
+}
+
+/* ---------- exportar ---------- */
+function csvCell(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }
+function crmExport(){
+  var f=filtrados();
+  if(!f.length){ toast('No hay datos para exportar'); return; }
+  var head=['Cliente','Código','Producto'];
+  for(var i=0;i<C.meses.length;i++) head.push(mLabel(C.meses[i]));
+  head=head.concat([mLabel(C.mesActual)+' (en curso)','Total periodo','Prom mensual','Prom por pedido','Tendencia %','Proyección próx. mes','Falta este mes','Valor faltante','Precio unitario','Último pedido','Días sin pedir','Frecuencia (días)','Próximo esperado','Estado']);
+  var rows=[head.map(csvCell).join(',')];
+  for(i=0;i<f.length;i++){
+    var s=f[i], r=[s.cliente,s.cod,s.prod];
+    for(var z=0;z<s.serie.length;z++) r.push(s.serie[z]);
+    r=r.concat([s.actual,s.total,Math.round(s.promMensual),s.tamPedido,Math.round(s.tend*100),s.proy,s.falta,Math.round(s.faltaVal),s.pu,s.ultima,s.dias,s.frec||'',s.prox,(EST[s.estado]||{}).t||s.estado]);
+    rows.push(r.map(csvCell).join(','));
+  }
+  var blob=new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='crm-recompra-'+(new Date()).toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },600);
+  toast('CSV exportado');
+}
+
+/* ---------- mensaje de seguimiento ---------- */
+function crmCopiar(cid){
+  var arr=C.items.filter(function(s){ return s.cid===cid&&(s.falta>0||s.estado==='atrasado'||s.estado==='inactivo'); });
+  arr.sort(function(a,b){ return b.faltaVal-a.faltaVal; });
+  if(!arr.length) arr=C.items.filter(function(s){ return s.cid===cid; });
+  var lin=[], ult='';
+  lin.push('Hola '+nombreCliente(cid)+', buen día.');
+  lin.push('Revisando tu historial de pedidos con Arqueta Folding:');
+  lin.push('');
+  for(var i=0;i<arr.length;i++){
+    var s=arr[i];
+    if(!ult||s.ultima>ult) ult=s.ultima;
+    var t='- '+s.prod+(s.cod?' ('+s.cod+')':'')+': promedio de '+nf(s.promMensual)+' pzas al mes';
+    t+=s.actual>0?(', este mes llevas '+nf(s.actual)+' pzas'):', este mes aún no registramos pedido';
+    if(s.falta>0) t+=', faltarían '+nf(s.falta)+' pzas para tu promedio';
+    if(s.estado==='inactivo') t+='. Sin pedidos desde hace '+s.dias+' días';
+    lin.push(t+'.');
+  }
+  lin.push('');
+  if(ult) lin.push('Tu último pedido registrado es del '+dLabel(ult)+'.');
+  lin.push('¿Te preparamos la orden de este mes?');
+  copiar(lin.join('\n'));
+}
+function copiar(txt){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){ toast('Mensaje copiado'); },function(){ copiarFB(txt); });
+  } else copiarFB(txt);
+}
+function copiarFB(txt){
+  var ta=document.createElement('textarea'); ta.value=txt;
+  ta.style.position='fixed'; ta.style.left='-9999px';
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand('copy'); toast('Mensaje copiado'); }catch(e){ window.prompt('Copia el mensaje:',txt); }
+  ta.remove();
+}
+
+/* ---------- shell + estilos ---------- */
+var SHELL=''
++'<div class="page-head"><div><h1>CRM · Recompra</h1><div class="sub" id="crm-sub">Track record mensual por producto y proyección del próximo pedido.</div></div>'
++'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary" id="crm-csv">Exportar CSV</button><button class="btn btn-primary" id="crm-refresh">Actualizar</button></div></div>'
++'<div class="grid grid-5" id="crm-stats"></div>'
++'<div class="searchbar" style="margin-top:18px">'
++'<input id="crm-q" placeholder="Buscar cliente, código o producto…" style="flex:1;min-width:220px">'
++'<select id="crm-cliente"><option value="">Todos los clientes</option></select>'
++'<select id="crm-hist"><option value="6">Últimos 6 meses</option><option value="12" selected>Últimos 12 meses</option><option value="18">Últimos 18 meses</option><option value="24">Últimos 24 meses</option></select>'
++'<select id="crm-estados"><option value="validas" selected>OC válidas (sin rechazadas)</option><option value="cerradas">Solo aceptadas y facturadas</option><option value="todas">Todas las OC</option></select>'
++'<label class="crm-chk"><input type="checkbox" id="crm-ajustar" checked> Ajustar por tendencia</label>'
++'</div>'
++'<div class="pill-row" id="crm-tabs"><button class="pill active" data-tab="producto">Por producto</button><button class="pill" data-tab="cliente">Por cliente</button><button class="pill" data-tab="alertas">A quién contactar</button></div>'
++'<div class="pill-row" id="crm-filtros"><button class="pill active" data-f="todos">Todos</button><button class="pill" data-f="falta">Le falta pedir</button><button class="pill" data-f="atrasado">Atrasado</button><button class="pill" data-f="inactivo">Inactivo</button><button class="pill" data-f="ok">Al día</button></div>'
++'<div class="card" id="crm-panel"></div>';
+
+var CSS=[
+'#view-crm .crm-spark{display:flex;align-items:flex-end;gap:2px;height:30px;width:130px}',
+'#view-crm .crm-spark i{flex:1 1 auto;min-width:3px;background:var(--kraft-soft);border-radius:1px}',
+'#view-crm .crm-spark i.on{background:var(--kraft)}',
+'#view-crm .crm-b{white-space:nowrap}',
+'#view-crm .crm-ok{background:var(--teal-soft);color:var(--teal)}',
+'#view-crm .crm-parcial{background:#D6E4F0;color:#2B5D9B}',
+'#view-crm .crm-pend{background:#FBEED2;color:#8A6A1E}',
+'#view-crm .crm-atr{background:var(--brick-soft);color:var(--brick)}',
+'#view-crm .crm-ina{background:#ECEFF3;color:#6B7A8D}',
+'#view-crm .crm-vent{background:#F0F2F5;color:#6B7A8D}',
+'#view-crm .crm-row{cursor:pointer}',
+'#view-crm .crm-row:hover{background:var(--paper-raised)}',
+'#view-crm .crm-det>td{background:var(--paper-raised)}',
+'#view-crm .crm-mm{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}',
+'#view-crm .crm-mm>div{border:1px solid var(--line);border-radius:4px;padding:6px 10px;background:#fff;min-width:76px}',
+'#view-crm .crm-mm .m{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}',
+'#view-crm .crm-mm .q{font-weight:600;font-size:13px}',
+'#view-crm .crm-mm .cur{border-color:var(--kraft);background:#F4F8FC}',
+'#view-crm .crm-facts{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12.5px;color:var(--ink-soft)}',
+'#view-crm .crm-alert{border:1px solid var(--line);border-radius:6px;padding:14px 16px;margin-bottom:12px;background:#fff}',
+'#view-crm .crm-alert-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}',
+'#view-crm .crm-alert h3{margin:0 0 2px}',
+'#view-crm .crm-money{font-family:Fraunces,serif;font-size:22px;font-weight:600}',
+'#view-crm .crm-alert .lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}',
+'#view-crm .crm-ul{margin:12px 0 0;padding-left:18px;font-size:13px;line-height:1.75}',
+'#view-crm .crm-chk{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap}',
+'#view-crm .crm-scroll{overflow-x:auto}',
+'#view-crm .crm-up{color:var(--teal)}',
+'#view-crm .crm-down{color:var(--brick)}'
+].join('\n');
+
+/* ---------- montaje ---------- */
+function inyectarCSS(){
+  if(document.getElementById('crm-styles')) return;
+  var st=document.createElement('style'); st.id='crm-styles'; st.textContent=CSS;
+  document.head.appendChild(st);
+}
+function crearNav(){
+  if(document.querySelector('.nav-item[data-view="crm"]')) return;
+  var ref=document.querySelector('.nav-item[data-view="ordenes"]');
+  if(!ref) return;
+  var it=document.createElement('div');
+  it.className='nav-item'; it.setAttribute('data-view','crm');
+  it.textContent='◈ CRM · Recompra';
+  it.addEventListener('click',function(){ if(typeof goTo==='function') goTo('crm'); });
+  ref.parentNode.insertBefore(it,ref.nextSibling);
+}
+function crearView(){
+  if(document.getElementById('view-crm')) return true;
+  var ref=document.getElementById('view-ordenes'); if(!ref) return false;
+  var v=document.createElement('div'); v.className='view'; v.id='view-crm'; v.innerHTML=SHELL;
+  ref.parentNode.appendChild(v); return true;
+}
+function marcar(cont,attr,val){
+  var bs=cont.querySelectorAll('button['+attr+']');
+  for(var i=0;i<bs.length;i++) bs[i].classList.toggle('active',bs[i].getAttribute(attr)===val);
+}
+function bind(){
+  var q=document.getElementById('crm-q');
+  if(q) q.addEventListener('input',function(){ S.q=this.value; pintarStats(); pintarPanel(); });
+  var cl=document.getElementById('crm-cliente');
+  if(cl) cl.addEventListener('change',function(){ S.cliente=this.value; pintarStats(); pintarPanel(); });
+  var hi=document.getElementById('crm-hist');
+  if(hi) hi.addEventListener('change',function(){ S.hist=Number(this.value)||12; renderCRM(); });
+  var es=document.getElementById('crm-estados');
+  if(es) es.addEventListener('change',function(){ S.estados=this.value; renderCRM(); });
+  var aj=document.getElementById('crm-ajustar');
+  if(aj) aj.addEventListener('change',function(){ S.ajustar=this.checked; renderCRM(); });
+  var cs=document.getElementById('crm-csv'); if(cs) cs.addEventListener('click',crmExport);
+  var rf=document.getElementById('crm-refresh'); if(rf) rf.addEventListener('click',renderCRM);
+  var tb=document.getElementById('crm-tabs');
+  if(tb) tb.addEventListener('click',function(ev){ var b=ev.target.closest('button[data-tab]'); if(!b) return; S.tab=b.getAttribute('data-tab'); marcar(tb,'data-tab',S.tab); pintarPanel(); });
+  var fi=document.getElementById('crm-filtros');
+  if(fi) fi.addEventListener('click',function(ev){ var b=ev.target.closest('button[data-f]'); if(!b) return; S.filtro=b.getAttribute('data-f'); marcar(fi,'data-f',S.filtro); pintarStats(); pintarPanel(); });
+  var pn=document.getElementById('crm-panel');
+  if(pn) pn.addEventListener('click',function(ev){
+    var bt=ev.target.closest('button[data-cid]');
+    if(bt){ ev.stopPropagation(); crmCopiar(bt.getAttribute('data-cid')); return; }
+    var row=ev.target.closest('.crm-row');
+    if(row){ var k=row.getAttribute('data-k'); S.abierto[k]=!S.abierto[k]; pintarPanel(); }
+  });
+}
+function parchar(){
+  if(typeof window.goTo==='function'&&!window.goTo.__crm){
+    var g=window.goTo;
+    var ng=function(n){ var r=g.apply(this,arguments); if(n==='crm'){ try{ renderCRM(); }catch(e){ console.error('CRM:',e); } } return r; };
+    ng.__crm=true; window.goTo=ng;
+  }
+  if(typeof window.renderAll==='function'&&!window.renderAll.__crm){
+    var ra=window.renderAll;
+    var nr=function(){ var r=ra.apply(this,arguments); var v=document.getElementById('view-crm'); if(v&&v.classList.contains('active')){ try{ renderCRM(); }catch(e){} } return r; };
+    nr.__crm=true; window.renderAll=nr;
+  }
+}
+function init(){ try{ inyectarCSS(); crearNav(); if(crearView()){ bind(); } parchar(); }catch(e){ console.error('CRM init:',e); } }
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+
+window.renderCRM=renderCRM;
+window.crmExport=crmExport;
+window.crmCopiar=crmCopiar;
+})();
+
+</script>
 </body>
 </html>
