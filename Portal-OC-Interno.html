@@ -5158,10 +5158,15 @@ function abrirDesactivados(){
 if(window.__crmInit) return; window.__crmInit=true;
 
 var MESES=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
-var EST={ok:{t:'Al día',c:'crm-ok'},parcial:{t:'Pedido parcial',c:'crm-parcial'},pendiente:{t:'Toca pedir',c:'crm-pend'},atrasado:{t:'Atrasado',c:'crm-atr'},inactivo:{t:'Inactivo',c:'crm-ina'},ventana:{t:'En ventana',c:'crm-vent'}};
-var RANK={ok:0,ventana:1,pendiente:2,parcial:3,atrasado:4,inactivo:5};
-var S={tab:'producto',filtro:'todos',q:'',cliente:'',hist:12,estados:'validas',ajustar:true,abierto:{}};
+var EST={ok:{t:'Al día',c:'crm-ok'},parcial:{t:'Pedido parcial',c:'crm-parcial'},pendiente:{t:'Toca pedir',c:'crm-pend'},atrasado:{t:'Atrasado',c:'crm-atr'},inactivo:{t:'Inactivo',c:'crm-ina'},corto:{t:'Historial corto',c:'crm-corto'},ventana:{t:'En ventana',c:'crm-vent'}};
+var RANK={ok:0,corto:1,ventana:1,pendiente:2,parcial:3,atrasado:4,inactivo:5};
+var S={tab:'producto',filtro:'todos',q:'',cliente:'',periodo:'12m',hist:12,estados:'validas',ajustar:true,abierto:{}};
 var C={items:[],meses:[],mesActual:''};
+var PROY_MIN_MESES=6, PROY_MIN_PEDIDOS=2;
+function periodoDias(){ var m=/^(\d+)d$/.exec(S.periodo); return m?Number(m[1]):0; }
+function periodoMeses(){ var d=periodoDias(); if(d) return Math.max(3,Math.ceil(d/30)+1); var m=/^(\d+)m$/.exec(S.periodo); return m?Number(m[1]):12; }
+function periodoLabel(){ var d=periodoDias(); return d?('últ. '+d+' días'):(periodoMeses()+' meses'); }
+function totalPeriodo(s){ var d=periodoDias(); if(d===30) return s.d30; if(d===60) return s.d60; if(d===90) return s.d90; return s.total; }
 
 /* ---------- utilidades ---------- */
 function getDB(){ try{ return DB; }catch(e){ return null; } }
@@ -5229,7 +5234,10 @@ function calcular(){
   }
   var hoy=new Date(); hoy.setHours(0,0,0,0);
   var mesActual=mkey(hoy);
-  var meses=[]; for(var m=S.hist;m>=1;m--) meses.push(mAdd(mesActual,-m));
+  var HM=periodoMeses(); S.hist=HM;
+  var PM=Math.max(PROY_MIN_MESES,HM);
+  var mesesP=[]; for(var m=PM;m>=1;m--) mesesP.push(mAdd(mesActual,-m));
+  var meses=mesesP.slice(-HM);
   var g={};
   for(i=0;i<regs.length;i++){
     var r=regs[i];
@@ -5252,20 +5260,35 @@ function calcular(){
     s.nPedidos=uf.length;
     if(uf.length>=2){ var df=[]; for(z=1;z<uf.length;z++) df.push(dias(dParse(uf[z-1]),dParse(uf[z]))); s.frec=Math.round(suma(df)/df.length); } else s.frec=0;
     s.serie=[]; for(z=0;z<meses.length;z++) s.serie.push(s.mm[meses[z]]||0);
+    s.serieP=[]; for(z=0;z<mesesP.length;z++) s.serieP.push(s.mm[mesesP[z]]||0);
+    var v30={},v60={},v90={}; s.d30=0; s.d60=0; s.d90=0;
+    for(z=0;z<s.regs.length;z++){ var dd=dias(dParse(s.regs[z].fecha),hoy);
+      if(dd<=30){ s.d30+=s.regs[z].qty; v30[s.regs[z].fecha]=1; }
+      if(dd<=60){ s.d60+=s.regs[z].qty; v60[s.regs[z].fecha]=1; }
+      if(dd<=90){ s.d90+=s.regs[z].qty; v90[s.regs[z].fecha]=1; } }
+    s.p30=Object.keys(v30).length; s.p60=Object.keys(v60).length; s.p90=Object.keys(v90).length;
     s.actual=s.mm[mesActual]||0;
     s.total=suma(s.serie);
-    var i0=-1; for(z=0;z<s.serie.length;z++){ if(s.serie[z]>0){ i0=z; break; } }
-    var b0=(i0<0?0:i0), span=(i0<0?0:s.serie.length-i0);
+    s.totalP=suma(s.serieP);
+    var i0=-1; for(z=0;z<s.serieP.length;z++){ if(s.serieP[z]>0){ i0=z; break; } }
+    var b0=(i0<0?0:i0), span=(i0<0?0:s.serieP.length-i0);
+    s.mesesHist=span;
     s.conPedido=0; for(z=0;z<s.serie.length;z++) if(s.serie[z]>0) s.conPedido++;
-    s.promMensual=span>0?s.total/span:0;
-    s.promActivo=s.conPedido>0?s.total/s.conPedido:0;
-    var nu=0,de=0; for(z=b0;z<s.serie.length;z++){ var w=z-b0+1; nu+=s.serie[z]*w; de+=w; }
+    s.conPedidoP=0; for(z=0;z<s.serieP.length;z++) if(s.serieP[z]>0) s.conPedidoP++;
+    s.promMensual=span>0?s.totalP/span:0;
+    s.promActivo=s.conPedidoP>0?s.totalP/s.conPedidoP:0;
+    var nu=0,de=0; for(z=b0;z<s.serieP.length;z++){ var w=z-b0+1; nu+=s.serieP[z]*w; de+=w; }
     s.pond=de>0?nu/de:0;
-    var u3=suma(s.serie.slice(-3))/3, p3=suma(s.serie.slice(-6,-3))/3;
+    var u3=suma(s.serieP.slice(-3))/3, p3=suma(s.serieP.slice(-6,-3))/3;
     s.tend=p3>0?((u3-p3)/p3):(u3>0?1:0);
+    var ufp=[]; for(z=0;z<uf.length;z++) if(mesesP.indexOf(uf[z].slice(0,7))>=0) ufp.push(uf[z]);
+    s.pedidosProy=ufp.length;
+    s.suficiente=(s.mesesHist>=PROY_MIN_MESES&&s.pedidosProy>=PROY_MIN_PEDIDOS);
+    s.confianza=!s.suficiente?'baja':(s.pedidosProy>=6?'alta':'media');
     var base=s.pond>0?s.pond:s.promMensual;
     var fac=S.ajustar?Math.max(0.7,Math.min(1.3,1+s.tend)):1;
-    s.proy=Math.round(base*fac);
+    s.proyBruta=Math.round(base*fac);
+    s.proy=s.suficiente?s.proyBruta:0;
     s.proyVal=s.proy*s.pu;
     s.falta=Math.max(0,s.proy-s.actual);
     s.faltaVal=s.falta*s.pu;
@@ -5276,6 +5299,7 @@ function calcular(){
     s.atraso=dias(dParse(s.prox),hoy);
     if(s.total<=0&&s.actual<=0) s.estado='inactivo';
     else if(s.dias>150) s.estado='inactivo';
+    else if(!s.suficiente) s.estado='corto';
     else if(s.actual>0&&s.falta<=Math.round(s.proy*0.15)) s.estado='ok';
     else if(s.actual>0) s.estado='parcial';
     else if(s.atraso>15) s.estado='atrasado';
@@ -5297,6 +5321,7 @@ function filtrados(){
     if(S.filtro==='atrasado'&&s.estado!=='atrasado') continue;
     if(S.filtro==='inactivo'&&s.estado!=='inactivo') continue;
     if(S.filtro==='ok'&&s.estado!=='ok') continue;
+    if(S.filtro==='insuf'&&s.suficiente) continue;
     out.push(s);
   }
   return out;
@@ -5337,12 +5362,13 @@ function statCard(num,lbl){
   return '<div class="stat-card crop"><div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div><div class="num">'+num+'</div><div class="lbl">'+lbl+'</div></div>';
 }
 function pintarStats(){
-  var f=filtrados(), pz=0, val=0, fv=0, cl={}, ina={};
+  var f=filtrados(), pz=0, val=0, fv=0, cl={}, ina={}, insuf=0;
   for(var i=0;i<f.length;i++){
     var s=f[i];
     if(s.estado!=='inactivo'){ pz+=s.proy; val+=s.proyVal; }
     if(s.falta>0&&s.estado!=='inactivo'&&s.estado!=='ventana'){ fv+=s.faltaVal; cl[s.cid]=1; }
     if(s.estado==='inactivo') ina[s.cid]=1;
+    if(!s.suficiente) insuf++;
   }
   var e=document.getElementById('crm-stats'); if(!e) return;
   e.innerHTML=statCard(nf(f.length),'Productos rastreados')
@@ -5351,28 +5377,29 @@ function pintarStats(){
     +statCard(mf(fv),'Por pedir este mes')
     +statCard(nf(Object.keys(ina).length),'Clientes inactivos');
   var sub=document.getElementById('crm-sub');
-  if(sub) sub.textContent='Historial de '+S.hist+' meses · mes en curso: '+mLabel(C.mesActual)+' · '+Object.keys(cl).length+' clientes con faltante';
+  if(sub) sub.textContent='Track record '+periodoLabel()+' · proyección sobre mínimo '+PROY_MIN_MESES+' meses y '+PROY_MIN_PEDIDOS+' pedidos · mes en curso: '+mLabel(C.mesActual)+' · '+Object.keys(cl).length+(Object.keys(cl).length===1?' cliente con faltante':' clientes con faltante')+(insuf?(' · '+insuf+' sin historial suficiente'):'');
 }
 function vacio(msg){ return '<div class="empty"><div class="big">◷</div>'+esc(msg)+'</div>'; }
 
 function tablaProducto(){
   var f=filtrados();
   if(!f.length) return vacio('No hay órdenes que coincidan con los filtros.');
-  var h='<div class="crm-scroll"><table><thead><tr><th>Cliente</th><th>Producto</th><th>Historial '+S.hist+'m</th><th>Prom/mes</th><th>Proyección próx.</th><th>Este mes</th><th>Falta</th><th>Último pedido</th><th>Frecuencia</th><th>Estado</th></tr></thead><tbody>';
+  var h='<div class="crm-scroll"><table><thead><tr><th>Cliente</th><th>Producto</th><th>Historial '+periodoLabel()+'</th><th>30 / 60 / 90 d</th><th>Prom/mes</th><th>Proyección próx.</th><th>Este mes</th><th>Falta</th><th>Último pedido</th><th>Frecuencia</th><th>Estado</th></tr></thead><tbody>';
   for(var i=0;i<f.length;i++){
     var s=f[i], k=s.cid+'||'+s.cod+'||'+i;
     h+='<tr class="crm-row" data-k="'+esc(k)+'" data-i="'+i+'">'
       +'<td>'+esc(s.cliente)+'</td>'
       +'<td><div style="font-weight:600">'+esc(s.prod)+'</div>'+(s.cod?'<div class="small-note mono">'+esc(s.cod)+'</div>':'')+'</td>'
       +'<td>'+spark(s)+'</td>'
+      +'<td class="crm-dw"><span><i>30d</i>'+nf(s.d30)+'</span><span><i>60d</i>'+nf(s.d60)+'</span><span><i>90d</i>'+nf(s.d90)+'</span></td>'
       +'<td><b>'+nf(s.promMensual)+'</b><div>'+tendHTML(s.tend)+'</div></td>'
-      +'<td><b>'+nf(s.proy)+'</b><div class="small-note">'+mf(s.proyVal)+'</div></td>'
+      +'<td>'+(s.suficiente?('<b>'+nf(s.proy)+'</b><div class="small-note">'+mf(s.proyVal)+' · conf. '+s.confianza+'</div>'):('<span class="small-note">sin base</span><div class="small-note">'+s.pedidosProy+' pedidos / '+s.mesesHist+' meses</div>'))+'</td>'
       +'<td>'+(s.actual>0?nf(s.actual):'<span class="small-note">—</span>')+'</td>'
       +'<td>'+(s.falta>0?'<b>'+nf(s.falta)+'</b><div class="small-note">'+mf(s.faltaVal)+'</div>':'<span class="small-note">—</span>')+'</td>'
       +'<td>'+dLabel(s.ultima)+'<div class="small-note">hace '+s.dias+' d</div></td>'
       +'<td>'+(s.frec>0?'c/'+s.frec+' d':'<span class="small-note">1 pedido</span>')+'</td>'
-      +'<td>'+badge(s.estado)+'</td></tr>';
-    if(S.abierto[k]) h+='<tr class="crm-det"><td colspan="10">'+detalle(s)+'</td></tr>';
+      +'<td>'+badge(s.estado)+(s.suficiente?'':'<div class="small-note">requiere 6 meses</div>')+'</td></tr>';
+    if(S.abierto[k]) h+='<tr class="crm-det"><td colspan="11">'+detalle(s)+'</td></tr>';
   }
   return h+'</tbody></table></div>';
 }
@@ -5380,15 +5407,19 @@ function detalle(s){
   var h='<div class="crm-mm">';
   for(var i=0;i<C.meses.length;i++) h+='<div><div class="m">'+mLabel(C.meses[i])+'</div><div class="q">'+(s.serie[i]?nf(s.serie[i]):'—')+'</div></div>';
   h+='<div class="cur"><div class="m">'+mLabel(C.mesActual)+' (en curso)</div><div class="q">'+(s.actual?nf(s.actual):'—')+'</div></div>';
-  h+='<div class="cur" style="border-style:dashed"><div class="m">Proyección</div><div class="q">'+nf(s.proy)+'</div></div></div>';
+  h+='<div class="cur" style="border-style:dashed"><div class="m">Proyección</div><div class="q">'+(s.suficiente?nf(s.proy):'—')+'</div></div></div>';
   h+='<div class="crm-facts">'
-    +'<span><b>Total '+S.hist+'m:</b> '+nf(s.total)+' pzas</span>'
+    +'<span><b>Total '+periodoLabel()+':</b> '+nf(totalPeriodo(s))+' pzas</span>'
+    +'<span><b>Últ. 30 d:</b> '+nf(s.d30)+' pzas · '+s.p30+' pedidos</span>'
+    +'<span><b>Últ. 60 d:</b> '+nf(s.d60)+' pzas · '+s.p60+' pedidos</span>'
+    +'<span><b>Últ. 90 d:</b> '+nf(s.d90)+' pzas · '+s.p90+' pedidos</span>'
     +'<span><b>Pedidos:</b> '+s.pedidosWin+' en el periodo · '+nf(s.tamPedido)+' pzas por pedido</span>'
     +'<span><b>Meses con pedido:</b> '+s.conPedido+' de '+S.hist+'</span>'
+    +'<span><b>Base de proyección:</b> '+s.mesesHist+' meses · '+s.pedidosProy+' pedidos · confianza '+s.confianza+'</span>'
     +'<span><b>Precio unitario:</b> '+(s.pu?('$'+s.pu.toFixed(2)):'—')+'</span>'
     +'<span><b>Próximo pedido esperado:</b> '+dLabel(s.prox)+(s.atraso>0?(' <span class="crm-down">('+s.atraso+' d de atraso)</span>'):'')+'</span>'
     +'</div>'
-    +'<div class="small-note" style="margin-top:8px">Proyección = promedio móvil ponderado de los meses con historial (más peso a los meses recientes)'+(S.ajustar?', ajustado por la tendencia de los últimos 3 meses contra los 3 previos':'')+'. El mes en curso no entra en el promedio.</div>';
+    +'<div class="small-note" style="margin-top:8px">Proyección = promedio móvil ponderado sobre un mínimo de '+PROY_MIN_MESES+' meses de historial y al menos '+PROY_MIN_PEDIDOS+' pedidos (más peso a los meses recientes)'+(S.ajustar?', ajustado por la tendencia de los últimos 3 meses contra los 3 previos':'')+'. El mes en curso no entra en el promedio. La ventana del selector cambia el track record que se muestra; la base de proyección nunca baja de '+PROY_MIN_MESES+' meses.'+(s.suficiente?'':' <b>Este producto todavía no tiene historial suficiente, por eso no se proyecta</b> (promedio tentativo: '+nf(s.proyBruta)+' pzas/mes).')+'</div>';
   return h;
 }
 function tablaCliente(){
@@ -5424,7 +5455,7 @@ function tablaAlertas(){
       var s=ps[j];
       if(!(s.falta>0||s.estado==='atrasado'||s.estado==='inactivo')) continue;
       h+='<li>'+badge(s.estado)+' <b>'+esc(s.prod)+'</b>'+(s.cod?' <span class="mono small-note">'+esc(s.cod)+'</span>':'')
-        +' — promedio '+nf(s.promMensual)+' pzas/mes, este mes '+nf(s.actual)+' pzas'
+        +(s.suficiente?(' — promedio '+nf(s.promMensual)+' pzas/mes, este mes '+nf(s.actual)+' pzas'):(' — historial corto ('+s.pedidosProy+' pedidos en '+s.mesesHist+' meses), sin proyección'))
         +(s.falta>0?(', faltan <b>'+nf(s.falta)+'</b> pzas ('+mf(s.faltaVal)+')'):'')
         +(s.frec>0?('. Suele pedir cada '+s.frec+' días; último '+dLabel(s.ultima)):'. Único pedido el '+dLabel(s.ultima))+'</li>';
     }
@@ -5459,12 +5490,12 @@ function crmExport(){
   if(!f.length){ toast('No hay datos para exportar'); return; }
   var head=['Cliente','Código','Producto'];
   for(var i=0;i<C.meses.length;i++) head.push(mLabel(C.meses[i]));
-  head=head.concat([mLabel(C.mesActual)+' (en curso)','Total periodo','Prom mensual','Prom por pedido','Tendencia %','Proyección próx. mes','Falta este mes','Valor faltante','Precio unitario','Último pedido','Días sin pedir','Frecuencia (días)','Próximo esperado','Estado']);
+  head=head.concat([mLabel(C.mesActual)+' (en curso)','Total periodo','Últ. 30 d pzas','Últ. 30 d pedidos','Últ. 60 d pzas','Últ. 60 d pedidos','Últ. 90 d pzas','Últ. 90 d pedidos','Prom mensual','Prom por pedido','Tendencia %','Proyección próx. mes','Falta este mes','Valor faltante','Precio unitario','Meses de historial','Pedidos base proyección','Confianza','Último pedido','Días sin pedir','Frecuencia (días)','Próximo esperado','Estado']);
   var rows=[head.map(csvCell).join(',')];
   for(i=0;i<f.length;i++){
     var s=f[i], r=[s.cliente,s.cod,s.prod];
     for(var z=0;z<s.serie.length;z++) r.push(s.serie[z]);
-    r=r.concat([s.actual,s.total,Math.round(s.promMensual),s.tamPedido,Math.round(s.tend*100),s.proy,s.falta,Math.round(s.faltaVal),s.pu,s.ultima,s.dias,s.frec||'',s.prox,(EST[s.estado]||{}).t||s.estado]);
+    r=r.concat([s.actual,totalPeriodo(s),s.d30,s.p30,s.d60,s.p60,s.d90,s.p90,Math.round(s.promMensual),s.tamPedido,Math.round(s.tend*100),(s.suficiente?s.proy:''),(s.suficiente?s.falta:''),(s.suficiente?Math.round(s.faltaVal):''),s.pu,s.mesesHist,s.pedidosProy,s.confianza,s.ultima,s.dias,s.frec||'',s.prox,(EST[s.estado]||{}).t||s.estado]);
     rows.push(r.map(csvCell).join(','));
   }
   var blob=new Blob(['\ufeff'+rows.join('\r\n')],{type:'text/csv;charset=utf-8;'});
@@ -5488,7 +5519,7 @@ function crmCopiar(cid){
   for(var i=0;i<arr.length;i++){
     var s=arr[i];
     if(!ult||s.ultima>ult) ult=s.ultima;
-    var t='- '+s.prod+(s.cod?' ('+s.cod+')':'')+': promedio de '+nf(s.promMensual)+' pzas al mes';
+    var t='- '+s.prod+(s.cod?' ('+s.cod+')':'')+(s.suficiente?(': promedio de '+nf(s.promMensual)+' pzas al mes'):': historial corto, aún sin promedio confiable');
     t+=s.actual>0?(', este mes llevas '+nf(s.actual)+' pzas'):', este mes aún no registramos pedido';
     if(s.falta>0) t+=', faltarían '+nf(s.falta)+' pzas para tu promedio';
     if(s.estado==='inactivo') t+='. Sin pedidos desde hace '+s.dias+' días';
@@ -5520,12 +5551,12 @@ var SHELL=''
 +'<div class="searchbar" style="margin-top:18px">'
 +'<input id="crm-q" placeholder="Buscar cliente, código o producto…" style="flex:1;min-width:220px">'
 +'<select id="crm-cliente"><option value="">Todos los clientes</option></select>'
-+'<select id="crm-hist"><option value="6">Últimos 6 meses</option><option value="12" selected>Últimos 12 meses</option><option value="18">Últimos 18 meses</option><option value="24">Últimos 24 meses</option></select>'
++'<select id="crm-hist" title="Ventana del track record. La proyección siempre usa mínimo 6 meses."><option value="30d">Últimos 30 días</option><option value="60d">Últimos 60 días</option><option value="90d">Últimos 90 días</option><option value="6m">Últimos 6 meses</option><option value="12m" selected>Últimos 12 meses</option><option value="18m">Últimos 18 meses</option><option value="24m">Últimos 24 meses</option></select>'
 +'<select id="crm-estados"><option value="validas" selected>OC válidas (sin rechazadas)</option><option value="cerradas">Solo aceptadas y facturadas</option><option value="todas">Todas las OC</option></select>'
 +'<label class="crm-chk"><input type="checkbox" id="crm-ajustar" checked> Ajustar por tendencia</label>'
 +'</div>'
 +'<div class="pill-row" id="crm-tabs"><button class="pill active" data-tab="producto">Por producto</button><button class="pill" data-tab="cliente">Por cliente</button><button class="pill" data-tab="alertas">A quién contactar</button></div>'
-+'<div class="pill-row" id="crm-filtros"><button class="pill active" data-f="todos">Todos</button><button class="pill" data-f="falta">Le falta pedir</button><button class="pill" data-f="atrasado">Atrasado</button><button class="pill" data-f="inactivo">Inactivo</button><button class="pill" data-f="ok">Al día</button></div>'
++'<div class="pill-row" id="crm-filtros"><button class="pill active" data-f="todos">Todos</button><button class="pill" data-f="falta">Le falta pedir</button><button class="pill" data-f="atrasado">Atrasado</button><button class="pill" data-f="inactivo">Inactivo</button><button class="pill" data-f="ok">Al día</button><button class="pill" data-f="insuf">Historial corto</button></div>'
 +'<div class="card" id="crm-panel"></div>';
 
 var CSS=[
@@ -5557,7 +5588,10 @@ var CSS=[
 '#view-crm .crm-chk{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);white-space:nowrap}',
 '#view-crm .crm-scroll{overflow-x:auto}',
 '#view-crm .crm-up{color:var(--teal)}',
-'#view-crm .crm-down{color:var(--brick)}'
+'#view-crm .crm-down{color:var(--brick)}',
+'#view-crm .crm-corto{background:#EDE7F6;color:#5B4B8A}',
+'#view-crm .crm-dw span{display:block;font-size:12px;white-space:nowrap;line-height:1.5}',
+'#view-crm .crm-dw i{display:inline-block;width:30px;color:var(--muted);font-style:normal;font-size:10px;text-transform:uppercase;letter-spacing:.04em}'
 ].join('\n');
 
 /* ---------- montaje ---------- */
@@ -5592,9 +5626,10 @@ function bind(){
   var cl=document.getElementById('crm-cliente');
   if(cl) cl.addEventListener('change',function(){ S.cliente=this.value; pintarStats(); pintarPanel(); });
   var hi=document.getElementById('crm-hist');
-  if(hi) hi.addEventListener('change',function(){ S.hist=Number(this.value)||12; renderCRM(); });
+  if(hi) hi.addEventListener('change',function(){ S.periodo=this.value; renderCRM(); });
   var es=document.getElementById('crm-estados');
   if(es) es.addEventListener('change',function(){ S.estados=this.value; renderCRM(); });
+  var hi2=document.getElementById('crm-hist'); if(hi2) hi2.value=S.periodo;
   var aj=document.getElementById('crm-ajustar');
   if(aj) aj.addEventListener('change',function(){ S.ajustar=this.checked; renderCRM(); });
   var cs=document.getElementById('crm-csv'); if(cs) cs.addEventListener('click',crmExport);
