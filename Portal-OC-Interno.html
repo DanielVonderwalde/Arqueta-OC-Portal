@@ -273,7 +273,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
-      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.07.20-d</div>
+      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-a</div>
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
     </div>
@@ -716,14 +716,16 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
                 <div class="field" style="margin:0;"><label>Materiales real</label><input type="number" step="0.01" id="ctrl-real-materiales" onchange="ctrlRenderComparison()"></div>
                 <div class="field" style="margin:0;"><label>Total Insumos real</label><input type="number" step="0.01" id="ctrl-real-insumos" onchange="ctrlRenderComparison()"></div>
               </div>
-              <div class="formrow" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px;">
+              <div class="formrow" style="grid-template-columns:repeat(5,1fr);gap:10px;margin-top:10px;">
                 <div class="field" style="margin:0;"><label>MOD real</label><input type="number" step="0.01" id="ctrl-real-mod" onchange="ctrlRenderComparison()"></div>
                 <div class="field" style="margin:0;"><label>EE/Máquinas real</label><input type="number" step="0.01" id="ctrl-real-ee" onchange="ctrlRenderComparison()"></div>
                 <div class="field" style="margin:0;"><label>Overhead real</label><input type="number" step="0.01" id="ctrl-real-overhead" onchange="ctrlRenderComparison()"></div>
-                <div class="field" style="margin:0;"><label>Costo Variable Total real</label><input type="number" step="0.01" id="ctrl-real-cvt" onchange="ctrlRenderComparison()"></div>
+                <div class="field" style="margin:0;"><label>Transporte real</label><input type="number" step="0.01" id="ctrl-real-transporte" oninput="ctrlTransporteTocado()" onchange="ctrlRenderComparison()"><div class="small-note" style="margin-top:4px;font-size:10.5px;line-height:1.35;">Se precarga con el transporte cotizado. Cámbialo si el real fue distinto.</div></div>
+                <div class="field" style="margin:0;"><label>Costo Variable Total real</label><input type="number" step="0.01" id="ctrl-real-cvt" oninput="ctrlCvtTocado()" onchange="ctrlRenderComparison()"></div>
               </div>
             </div>
           </details>
+          <div class="small-note" id="ctrl-cvt-check" style="margin-bottom:10px;"></div>
           <div style="border-top:1px solid var(--line);margin:12px 0 10px;padding-top:10px;">
             <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer;">
               <input type="checkbox" id="ctrl-mc-same" checked onchange="ctrlRenderComparison()">
@@ -3850,7 +3852,7 @@ function ctrlQuoteChanged(){
   const tiers = qid ? tiersForQuote(qid).filter(t=>!t.blended) : [];
   const tierInput = document.getElementById('ctrl-tier');
   tierInput.value = '';
-  ctrlExcelTiers = null; ctrlExcelB31 = null; ctrlExcelOrigen = '';
+  ctrlExcelTiers = null; ctrlExcelB31 = null; ctrlExcelOrigen = ''; ctrlTransTocado = false;
   ctrlVerdict('');
   const q0 = quoteById(qid);
   const hint = document.getElementById('ctrl-dl-hint');
@@ -3872,14 +3874,19 @@ function ctrlTierChanged(){
   ctrlRenderComparison();
 }
 function ctrlClear(){
-  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
+  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','transporte','cvt'].forEach(f=>{
     document.getElementById('ctrl-real-'+f).value = '';
   });
+  ctrlTransTocado = false; ctrlCvtManual = false;
   ctrlRenderComparison();
 }
 
 let ctrlJobsData = []; // Parsed jobs from Excel
 let ctrlJobMC = null;  // MC% tal como lo reporta el Job (columna Z)
+let ctrlTransTocado = false; // el usuario escribio el transporte real a mano
+let ctrlCvtManual   = false; // el usuario escribio el CVT real a mano
+function ctrlTransporteTocado(){ ctrlTransTocado = true; }
+function ctrlCvtTocado(){ ctrlCvtManual = true; }
 function ctrlLoadJobs(input){
   const file = input.files[0];
   if(!file) return;
@@ -3922,8 +3929,13 @@ function ctrlLoadJobs(input){
       // Populate selector
       const sel = document.getElementById('ctrl-job-select');
       sel.innerHTML = '<option value="">Selecciona un job...</option>' + ctrlJobsData.map((j,i)=>{
-        const dateStr = j.ordered ? new Date(j.ordered).toLocaleDateString('es-MX',{timeZone:TZ_MX, month:'short',day:'numeric'}) : '';
-        return `<option value="${i}">${j.job} — ${j.description} (${j.customer}) ${dateStr}</option>`;
+        // Job . descripcion . cantidad (AG QTY/PRO): distingue corridas del mismo producto
+        const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const partes = [];
+        if(j.job !== null && j.job !== undefined && String(j.job).trim() !== '') partes.push(String(j.job).trim());
+        if(j.description !== null && j.description !== undefined && String(j.description).trim() !== '') partes.push(String(j.description).trim());
+        if(j.qty_pro) partes.push(qty(j.qty_pro) + ' pza');
+        return '<option value="' + i + '">' + esc(partes.join(' · ')) + '</option>';
       }).join('');
       document.getElementById('ctrl-job-selector').style.display='';
       statusEl.textContent = ctrlJobsData.length+' jobs encontrados en "'+sheetName+'".';
@@ -3960,6 +3972,7 @@ function ctrlJobSelected(){
   document.getElementById('ctrl-real-ee').value = j.machines || '';
   document.getElementById('ctrl-real-overhead').value = j.overheads || '';
   document.getElementById('ctrl-real-cvt').value = j.total_normal || '';
+  ctrlCvtManual = false;   // AW (Total normal) del Excel de Jobs: NO incluye transporte
 
   ctrlRenderComparison();
   showToast('Datos del Job '+j.job+' cargados');
@@ -4166,7 +4179,7 @@ function ctrlGetQuotedData(){
       es_exacta: modo==='exacta', modo,
       papel:o.papel, acabado:o.acabado, materiales:o.materiales,
       insumos:o.papel+o.acabado+o.materiales,
-      mod:o.mod, ee:o.ee, overhead:o.overhead,
+      mod:o.mod, ee:o.ee, overhead:o.overhead, transporte:o.transporte,
       cvt: cvt,
       venta: venta,
       mc: venta ? (venta - cvt)/venta*100 : 0,            // ← MC calculado, no del Excel
@@ -4238,12 +4251,37 @@ function ctrlGetQuotedData(){
    formula del cotizado en vez de usar la columna Z del Job. */
 function ctrlGetRealData(){
   const real = {};
-  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','cvt'].forEach(f=>{
+  ['qty','venta','mc','precio','papel','acabado','materiales','insumos','mod','ee','overhead','transporte','cvt'].forEach(f=>{
     const el = document.getElementById('ctrl-real-'+f);
     const v = String(el.value||'').replace(/,/g,'');
     real[f] = v==='' ? null : Number(v);
   });
   real.mc_reportado = ctrlJobMC;
+  /* ---- CVT real: se cierra la brecha del transporte ----
+     El Excel de Jobs autollena ctrl-real-cvt con AW (Total normal), que NO trae transporte.
+     Por eso, si el CVT no se capturo a mano, se le suma el transporte real encima.
+     Si no hay ningun CVT, se arma desde los rubros + transporte.
+     Si el usuario lo escribio a mano, ese valor manda tal cual. */
+  real.transporte_capturado = (real.transporte !== null && real.transporte !== undefined);
+  real.transporte_editado   = !!ctrlTransTocado;
+  const tReal = Number(real.transporte) || 0;
+  const RUBROS_REALES = ['papel','acabado','materiales','mod','ee','overhead'];
+  const hayRubros = RUBROS_REALES.some(k => real[k] !== null && real[k] !== undefined);
+  const sumaRubros = hayRubros ? RUBROS_REALES.reduce((s,k) => s + (Number(real[k])||0), 0) + tReal : null;
+  real.cvt_rubros = sumaRubros;
+  real.cvt_manual = !!ctrlCvtManual;
+  real.cvt_alerta = false;
+  if(ctrlCvtManual && real.cvt !== null && real.cvt !== undefined){
+    real.cvt_origen = 'capturado a mano';
+    real.cvt_alerta = (sumaRubros !== null && Math.abs(real.cvt - sumaRubros) > 1);
+  } else if(real.cvt !== null && real.cvt !== undefined){
+    real.cvt_base = real.cvt;
+    real.cvt = real.cvt + tReal;
+    real.cvt_origen = 'Excel de Jobs (AW) + transporte';
+  } else {
+    real.cvt = sumaRubros;
+    real.cvt_origen = (sumaRubros === null) ? 'sin dato' : 'suma de rubros + transporte';
+  }
   const same = (document.getElementById('ctrl-mc-same')||{}).checked;
   real.mc_formula = same ? 'calculado' : 'reportado (col Z)';
   if(same && real.venta && real.cvt!==null && real.cvt!==undefined){
@@ -4269,6 +4307,27 @@ function ctrlRenderMCCheck(real){
   }
   el.innerHTML = partes.join(' &nbsp;·&nbsp; ') + extra;
 }
+/* Precarga el transporte real con el transporte cotizado del escalon,
+   mientras el usuario no haya escrito nada en el campo. */
+function ctrlPrefillTransporte(quoted){
+  const el = document.getElementById('ctrl-real-transporte');
+  if(!el || ctrlTransTocado) return;
+  const t = Number(quoted && quoted.transporte) || 0;
+  el.value = t > 0 ? Number(t.toFixed(2)) : '';
+}
+function ctrlRenderCvtCheck(real){
+  const el = document.getElementById('ctrl-cvt-check');
+  if(!el) return;
+  if(real.cvt === null || real.cvt === undefined){ el.innerHTML = ''; return; }
+  let txt = 'CVT real: <strong>' + money(real.cvt) + '</strong> &nbsp;·&nbsp; origen: ' + (real.cvt_origen || '—');
+  if(real.cvt_rubros !== null && real.cvt_rubros !== undefined) txt += ' &nbsp;·&nbsp; suma de rubros + transporte: ' + money(real.cvt_rubros);
+  if(real.cvt_alerta){
+    txt += '<div style="margin-top:6px;background:rgba(166,74,58,.08);border:1px solid var(--brick);border-radius:6px;padding:8px 12px;color:var(--brick);">'
+        + 'El CVT real capturado a mano (' + money(real.cvt) + ') no cuadra con la suma de rubros + transporte (' + money(real.cvt_rubros) + '): '
+        + 'diferencia de ' + money(real.cvt - real.cvt_rubros) + '. Revisa que no falte o sobre un rubro.</div>';
+  }
+  el.innerHTML = txt;
+}
 function ctrlRenderComparison(){
   const quoted = ctrlGetQuotedData();
   if(!quoted){ document.getElementById('ctrl-scorecards').innerHTML=''; document.getElementById('ctrl-table').innerHTML=''; return; }
@@ -4278,8 +4337,10 @@ function ctrlRenderComparison(){
     Valor de venta = ${qty(quoted.cantidad_venta)} pza &times; ${money(quoted.precio)} = <strong>${money(quoted.venta)}</strong> (precio comprometido, no del Excel)<br>
     MC% cotizado = (venta &minus; costo variable total) &divide; venta = <strong>${quoted.mc.toFixed(1)}%</strong> &mdash; calculado aqui, no leido del Excel
   </div>`;
+  ctrlPrefillTransporte(quoted);
   const real = ctrlGetRealData();
   ctrlRenderMCCheck(real);
+  ctrlRenderCvtCheck(real);
 
   const rows = [
     {label:'Papel/Sustrato', cot:quoted.papel, real:real.papel},
@@ -4289,6 +4350,7 @@ function ctrlRenderComparison(){
     {label:'MOD', cot:quoted.mod, real:real.mod},
     {label:'EE/Máquinas', cot:quoted.ee, real:real.ee},
     {label:'Overhead', cot:quoted.overhead, real:real.overhead},
+    {label:'Transporte', cot:quoted.transporte, real:real.transporte},
     {label:'Costo Variable Total', cot:quoted.cvt, real:real.cvt, bold:true},
     {label:'Valor de Venta', cot:quoted.venta, real:real.venta, bold:true},
     {label:'MC% ('+(real.mc_formula||'calculado')+')', cot:quoted.mc, real:real.mc, isPct:true},
@@ -4342,6 +4404,7 @@ function ctrlSave(){
     quote_id: qid, tier_qty: tierQty, modo: quoted?.modo || '',
     fuente: ctrlExcelOrigen || 'base de datos', pedido_b31: ctrlExcelB31 || null,
     precio_cotizado: ctrlPrecioCotizado(),
+    transporteRealCapturado: !!real.transporte_capturado, cvt_origen: real.cvt_origen || '',
     quoted: quoted, real: real
   });
   saveData(); showToast('Comparación guardada'); ctrlRenderHistory();
@@ -4628,7 +4691,7 @@ function ctrlNueva(){
 
 /* ---------- Graficas SVG (sin librerias) ---------- */
 const CHART_ROWS = [['papel','Papel'],['acabado','Acabado'],['materiales','Materiales'],
-  ['mod','MOD'],['ee','EE/Máquinas'],['overhead','Overhead']];
+  ['mod','MOD'],['ee','EE/Máquinas'],['overhead','Overhead'],['transporte','Transporte']];
 
 function svgEsc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
@@ -4737,6 +4800,7 @@ function ctrlShowDetail(id){
     {label:'MOD', cot:h.quoted?.mod, real:h.real?.mod},
     {label:'EE/Máquinas', cot:h.quoted?.ee, real:h.real?.ee},
     {label:'Overhead', cot:h.quoted?.overhead, real:h.real?.overhead},
+    {label:'Transporte', cot:h.quoted?.transporte, real:h.real?.transporte},
     {label:'CVT', cot:h.quoted?.cvt, real:h.real?.cvt, bold:true},
     {label:'Valor de Venta', cot:h.quoted?.venta, real:h.real?.venta, bold:true},
     {label:'MC%', cot:h.quoted?.mc, real:h.real?.mc, isPct:true},
@@ -4802,7 +4866,7 @@ function ctrlExportHistory(){
     real: list.reduce((s,h)=>s+(n(h.real?.[k])||0),0)
   });
   const rubros = [['Papel/Sustrato','papel'],['Acabado','acabado'],['Materiales','materiales'],
-    ['Total Insumos','insumos'],['MOD','mod'],['EE/Máquinas','ee'],['Overhead','overhead'],
+    ['Total Insumos','insumos'],['MOD','mod'],['EE/Máquinas','ee'],['Overhead','overhead'],['Transporte','transporte'],
     ['Costo Variable Total','cvt'],['Valor de Venta','venta']];
   const resumen = [
     ['ARQUETA FOLDING — Reporte Controller: cotizado vs real'],
@@ -4827,12 +4891,12 @@ function ctrlExportHistory(){
   resumen.push(['Jobs por DEBAJO o en costo', list.length-overs]);
 
   /* ---- Hoja 2: Detalle ---- */
-  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza','MC% real: origen','MC% reportado Job'];
+  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza','MC% real: origen','MC% reportado Job','Transporte real capturado','Origen CVT real'];
   rubros.forEach(([label])=>headers.push(label+' Cot', label+' Real', label+' Dif $', label+' Dif %'));
   headers.push('MC% Cot','MC% Real','MC% Dif (pp)','Precio/pza Cot','Precio/pza Real','Precio/pza Dif');
   const detalle = [headers];
   list.forEach(h=>{
-    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado), h.real?.mc_formula||'—', n(h.real?.mc_reportado)];
+    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado), h.real?.mc_formula||'—', n(h.real?.mc_reportado), (h.real && h.real.transporte_capturado) ? 'Si' : 'No', (h.real && h.real.cvt_origen) || '—'];
     rubros.forEach(([label,key])=>{
       row.push(n(h.quoted?.[key]), n(h.real?.[key]), dif(h.real?.[key],h.quoted?.[key]), difp(h.real?.[key],h.quoted?.[key]));
     });
