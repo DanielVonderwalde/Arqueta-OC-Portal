@@ -273,7 +273,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
-      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-b</div>
+      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-c</div>
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
     </div>
@@ -3907,6 +3907,17 @@ let ctrlJobMC = null;  // MC% tal como lo reporta el Job (columna Z)
 let ctrlTransTocado = false; // el usuario escribio el transporte real a mano
 let ctrlCvtManual   = false; // el usuario escribio el CVT real a mano
 function ctrlTransporteTocado(){ ctrlTransTocado = true; }
+/* Captura del transporte real directamente en la celda de la tabla de rubros. */
+function ctrlTransporteInline(v){
+  const master = document.getElementById('ctrl-real-transporte');
+  if(!master) return;
+  const val = String(v==null?'':v).replace(/,/g,'').trim();
+  master.value = val;
+  ctrlTransTocado = (val !== '');
+  ctrlRenderComparison();
+  const el = document.getElementById('ctrl-real-transporte-inline');
+  if(el){ el.focus(); try{ el.select(); }catch(e){} }
+}
 function ctrlCvtTocado(){ ctrlCvtManual = true; }
 function ctrlLoadJobs(input){
   const file = input.files[0];
@@ -4429,7 +4440,7 @@ function ctrlRenderComparison(){
     {label:'MOD', cot:quoted.mod, real:real.mod},
     {label:'EE/Máquinas', cot:quoted.ee, real:real.ee},
     {label:'Overhead', cot:quoted.overhead, real:real.overhead},
-    {label:'Transporte', cot:quoted.transporte, real:real.transporte},
+    {label:'Transporte', cot:quoted.transporte, real:real.transporte, edit:'transporte'},
     {label:'Costo Variable Total', cot:quoted.cvt, real:real.cvt, bold:true},
     {label:'Valor de Venta', cot:quoted.venta, real:real.venta, bold:true},
     {label:'MC% ('+(real.mc_formula||'calculado')+')', cot:quoted.mc, real:real.mc, isPct:true},
@@ -4460,9 +4471,14 @@ function ctrlRenderComparison(){
       const fw = r.bold ? 'font-weight:700;' : '';
       const fmtCot = r.isPct ? (r.cot!==null?r.cot.toFixed(1)+'%':'—') : r.isQty ? qty(r.cot) : money(r.cot);
       const fmtReal = r.real!==null ? (r.isPct ? r.real.toFixed(1)+'%' : r.isQty ? qty(r.real) : money(r.real)) : '—';
+      const celdaReal = r.edit ? ('<input type="number" step="0.01" id="ctrl-real-'+r.edit+'-inline"'
+        + ' value="'+(r.real!==null&&r.real!==undefined?r.real:'')+'"'
+        + ' onchange="ctrlTransporteInline(this.value)" placeholder="captura el real"'
+        + ' title="Captura aqui el transporte real. Si lo dejas vacio se vuelve a precargar con el cotizado."'
+        + ' style="width:140px;text-align:right;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--paper);font-family:inherit;font-size:13px;color:inherit;">') : fmtReal;
       const fmtDiff = diff!==null ? (r.isPct ? (diff>=0?'+':'')+diff.toFixed(1)+'pp' : money(diff)) : '—';
       const fmtDiffPct = diffPct!==null ? (diffPct>=0?'+':'')+diffPct.toFixed(1)+'%' : '—';
-      return `<tr style="${bg}"><td style="${fw}">${r.label}</td><td class="mono" style="text-align:right;${fw}">${fmtCot}</td><td class="mono" style="text-align:right;${fw}">${fmtReal}</td><td class="mono" style="text-align:right;${fw}${useColor}">${fmtDiff}</td><td class="mono" style="text-align:right;${fw}${useColor}">${r.isPct?'':fmtDiffPct}</td></tr>`;
+      return `<tr style="${bg}"><td style="${fw}">${r.label}${r.edit?'<span style="font-size:11px;color:var(--muted);font-weight:400;"> &middot; editable</span>':''}</td><td class="mono" style="text-align:right;${fw}">${fmtCot}</td><td class="mono" style="text-align:right;${fw}">${celdaReal}</td><td class="mono" style="text-align:right;${fw}${useColor}">${fmtDiff}</td><td class="mono" style="text-align:right;${fw}${useColor}">${r.isPct?'':fmtDiffPct}</td></tr>`;
     }).join('')}
     </tbody></table>
   </div>`;
