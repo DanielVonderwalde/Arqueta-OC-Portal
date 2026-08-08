@@ -273,7 +273,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
-      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-a</div>
+      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-b</div>
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
     </div>
@@ -676,6 +676,14 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
         </div>
         <div id="ctrl-excel-verdict" style="margin-top:8px;"></div>
         <div class="small-note" id="ctrl-quote-excel-status" style="margin-top:6px;"></div>
+        <div style="border-top:1px solid var(--line);margin-top:12px;padding-top:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+          <div>
+            <strong style="font-size:12.5px;">Transporte cotizado de cotizaciones anteriores</strong>
+            <div style="font-size:11.5px;color:var(--muted);">Relee el Excel guardado de cada cotización y llena el transporte que falte (hoja <strong>Valor Venta</strong>, fila 20). No pisa los escalones que ya traen valor.</div>
+          </div>
+          <button class="btn btn-secondary" style="white-space:nowrap;" onclick="ctrlBackfillTransporte()">Rellenar transporte faltante</button>
+        </div>
+        <div class="small-note" id="ctrl-backfill-status" style="margin-top:6px;line-height:1.5;"></div>
       </div>
 
       <div id="ctrl-comparison" style="display:none;">
@@ -2839,7 +2847,20 @@ function extractCostBreakdownFromWorkbook(wb){
   const lMod = find('MOD');
   const lEe = find('EE');
   const lExt = find('EXTRAS','EXTRAS ');
-  const lTrans = find('TRANSPORTE');
+  /* TRANSPORTE: primero por etiqueta (tolerando variantes tipo 'TRANSPORTE / FLETE');
+     si la etiqueta no aparece, se lee directo de la FILA 20 de la hoja Valor Venta. */
+  const findLike = (sub) => { for(const k in rowOf){ if(k.indexOf(sub) >= 0) return k; } return null; };
+  const lTrans = findLike('TRANSPORT');
+  const FILA_TRANSPORTE = 19;   // fila 20 del Excel (indice 0)
+  const ETIQUETAS_OTRAS = ['SUSTRATO','ACABADO','MATERIALES','MOD','EE','EXTRAS','TOTAL INSUMOS','COSTO VARIABLE TOTAL','VALOR DE VENTA TOTAL','MARGEN','PRECIO DE VENTA'];
+  const etFila20 = (rows[FILA_TRANSPORTE] && rows[FILA_TRANSPORTE][0] != null) ? String(rows[FILA_TRANSPORTE][0]).trim().toUpperCase() : '';
+  const usarFila20 = !lTrans && ETIQUETAS_OTRAS.indexOf(etFila20) < 0;
+  const transporteAt = (col) => {
+    if(lTrans){ const v = at(lTrans, col); if(v !== null && v !== undefined) return v; }
+    if(usarFila20 && rows[FILA_TRANSPORTE]) return num(rows[FILA_TRANSPORTE][col]);
+    return null;
+  };
+  console.log('Transporte -> etiqueta:', lTrans, '| fila 20:', etFila20, '| usa fila 20:', usarFila20);
   const lVenta = find('VALOR DE VENTA TOTAL');
   const lMargen = find('MARGEN');
   const lPrecio = find('PRECIO DE VENTA');
@@ -2878,7 +2899,7 @@ function extractCostBreakdownFromWorkbook(wb){
       mod: at(lMod, col),
       ee: at(lEe, col),
       extras: at(lExt, col),
-      transporte: at(lTrans, col),
+      transporte: transporteAt(col),
       valor_venta_total: at(lVenta, col) || (finalPrice ? Math.round(quantity*finalPrice*100)/100 : null),
       margen: tierMargen !== null ? tierMargen : masterMargen,
       precio_pieza: finalPrice
@@ -4091,6 +4112,64 @@ async function ctrlLoadStoredExcel(){
   }catch(e){ statusEl.textContent = 'Error al leer el Excel guardado: '+e.message; }
 }
 
+/* Relee el Excel guardado de cada cotizacion y completa el transporte que falte
+   en el cost breakdown. No pisa escalones que ya traen un valor distinto de cero. */
+async function ctrlBackfillTransporte(){
+  const el = document.getElementById('ctrl-backfill-status');
+  const quotes = DB.quotes || [];
+  if(!quotes.length){ if(el) el.textContent = 'No hay cotizaciones cargadas.'; return; }
+  if(el) el.textContent = 'Revisando ' + quotes.length + ' cotizacion(es)...';
+  const cambios = [], distintos = [];
+  let sinExcel = 0, sinTransporte = 0, errores = 0;
+  for(const q of quotes){
+    let data = q && q.excelData;
+    if(!data || data === '[cloud]' || data.length < 100){
+      try{ const snap = await fbFilesRef.child('xls_' + q.id).once('value'); const f = snap.val(); data = f && f.data; }
+      catch(e){ data = null; }
+    }
+    if(!data){ sinExcel++; continue; }
+    let tiers = [];
+    try{ tiers = extractCostBreakdownFromWorkbook(ctrlB64ToWorkbook(data)); }
+    catch(e){ errores++; continue; }
+    let trajo = false;
+    tiers.forEach(t => {
+      if(t.transporte === null || t.transporte === undefined) return;
+      trajo = true;
+      const row = (DB.costBreakdown || []).find(r => r && r.quote_id === q.id && Number(r.quantity_tier) === Number(t.quantity_tier) && !r.blended);
+      if(!row) return;
+      const actual = (row.transporte === null || row.transporte === undefined) ? null : Number(row.transporte);
+      if(actual === null || actual === 0){
+        cambios.push({row:row, valor:t.transporte, q:(q.quote_number || q.id), qty:t.quantity_tier});
+      } else if(Math.abs(actual - t.transporte) > 0.01){
+        distintos.push((q.quote_number || q.id) + ' / ' + qty(t.quantity_tier) + ' pza: portal ' + money(actual) + ' vs Excel ' + money(t.transporte));
+      }
+    });
+    if(!trajo) sinTransporte++;
+  }
+  const resumen = [];
+  if(distintos.length) resumen.push(distintos.length + ' con valor distinto al Excel (no se tocan)');
+  if(sinExcel) resumen.push(sinExcel + ' sin Excel guardado');
+  if(sinTransporte) resumen.push(sinTransporte + ' sin transporte legible en Valor Venta');
+  if(errores) resumen.push(errores + ' con error de lectura');
+  const cola = (resumen.length ? ' &nbsp;·&nbsp; ' + resumen.join(' &nbsp;·&nbsp; ') : '')
+            + (distintos.length ? '<br>Revisar a mano: ' + distintos.join('<br>') : '');
+  if(!cambios.length){
+    if(el) el.innerHTML = 'No hay transporte faltante que rellenar.' + cola;
+    return;
+  }
+  const detalle = cambios.slice(0,15).map(c => c.q + ' / ' + qty(c.qty) + ' pza  ->  ' + money(c.valor)).join('\n');
+  const extra = cambios.length > 15 ? '\n... y ' + (cambios.length - 15) + ' mas' : '';
+  if(!confirm('Se va a escribir el transporte cotizado en ' + cambios.length + ' escalon(es):\n\n' + detalle + extra + '\n\n¿Continuar?')){
+    if(el) el.innerHTML = 'Cancelado.' + cola;
+    return;
+  }
+  cambios.forEach(c => { c.row.transporte = c.valor; });
+  saveData();
+  if(el) el.innerHTML = 'Listo: transporte escrito en ' + cambios.length + ' escalon(es).' + cola;
+  showToast('Transporte actualizado en ' + cambios.length + ' escalon(es)');
+  try{ renderAll(); }catch(e){}
+  try{ ctrlRenderComparison(); }catch(e){}
+}
 function ctrlLoadQuoteExcel(input){
   const file = input.files[0];
   if(!file) return;
