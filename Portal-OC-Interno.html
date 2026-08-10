@@ -273,7 +273,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
     <div class="nav-item admin-only" data-view="comparar" onclick="goTo('comparar')"><span class="ic">⇄</span> Controller</div>
     <div class="nav-item" data-view="portal" onclick="goTo('portal')"><span class="ic">⌁</span> Portal clientes</div>
     <div class="sidebar-footer">
-      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-c</div>
+      <div id="build-stamp" style="font-size:10px;color:#8A8578;margin-bottom:6px;" title="Versión del portal">v2026.08.08-d</div>
       <div class="who">👤 admin</div>
       <button class="btn btn-secondary btn-block" style="background:transparent;border-color:rgba(255,255,255,0.25);color:#EDEAE0;" onclick="handleLogout()">Cerrar sesión</button>
     </div>
@@ -3904,6 +3904,9 @@ function ctrlClear(){
 
 let ctrlJobsData = []; // Parsed jobs from Excel
 let ctrlJobMC = null;  // MC% tal como lo reporta el Job (columna Z)
+let ctrlJobsArchivo = ''; // nombre del Excel de Jobs cargado
+let ctrlJobsHoja = '';    // hoja de la que se leyeron los jobs
+let ctrlJobOrigen = null; // de que archivo/job vienen los datos reales en pantalla
 let ctrlTransTocado = false; // el usuario escribio el transporte real a mano
 let ctrlCvtManual   = false; // el usuario escribio el CVT real a mano
 function ctrlTransporteTocado(){ ctrlTransTocado = true; }
@@ -3934,6 +3937,9 @@ function ctrlLoadJobs(input){
       if(rows.length<2){ statusEl.textContent='No se encontraron datos en el archivo.'; return; }
 
       ctrlJobsData = [];
+      ctrlJobsArchivo = file.name || '';
+      ctrlJobsHoja = sheetName || '';
+      ctrlJobOrigen = null;
       for(let r=1; r<rows.length; r++){
         const row = rows[r];
         if(!row || !row[2]) continue; // Skip if no Job number (col C)
@@ -3985,6 +3991,17 @@ function ctrlJobSelected(){
   const j = ctrlJobsData[Number(idx)];
   if(!j) return;
 
+  /* De donde vienen los numeros reales: archivo, hoja, fila y Job ID */
+  ctrlJobOrigen = {
+    archivo: ctrlJobsArchivo || '',
+    hoja: ctrlJobsHoja || '',
+    job: j.job || '',
+    descripcion: j.description || '',
+    cliente: j.customer || '',
+    qty: j.qty_pro || null,
+    fila: (j.rowIdx != null) ? (j.rowIdx + 1) : null,
+    cargado: (typeof ahoraMX === 'function') ? ahoraMX() : ''
+  };
   // Auto-fill all real fields
   ponerNumero(document.getElementById('ctrl-real-qty'), j.qty_pro);
   // La cantidad a comparar sale del Job (AG = QTY/PRO) salvo que se desactive
@@ -4500,6 +4517,7 @@ function ctrlSave(){
     fuente: ctrlExcelOrigen || 'base de datos', pedido_b31: ctrlExcelB31 || null,
     precio_cotizado: ctrlPrecioCotizado(),
     transporteRealCapturado: !!real.transporte_capturado, cvt_origen: real.cvt_origen || '',
+    real_origen: ctrlJobOrigen ? Object.assign({}, ctrlJobOrigen) : null,
     quoted: quoted, real: real
   });
   saveData(); showToast('Comparación guardada'); ctrlRenderHistory();
@@ -4769,7 +4787,7 @@ function ctrlNueva(){
   document.getElementById('ctrl-quote').innerHTML = '<option value="">Selecciona cotización...</option>';
   document.getElementById('ctrl-tier').value = '';
   document.getElementById('ctrl-quoted-price').value = '';
-  ctrlExcelTiers = null; ctrlExcelB31 = null; ctrlExcelOrigen = ''; ctrlJobMC = null; ctrlJobsData = [];
+  ctrlExcelTiers = null; ctrlExcelB31 = null; ctrlExcelOrigen = ''; ctrlJobMC = null; ctrlJobsData = []; ctrlJobsArchivo = ''; ctrlJobsHoja = ''; ctrlJobOrigen = null;
   const js = document.getElementById('ctrl-job-select'); if(js) js.innerHTML = '<option value="">Selecciona un job...</option>';
   const jsel = document.getElementById('ctrl-job-selector'); if(jsel) jsel.style.display = 'none';
   ['ctrl-jobs-status','ctrl-quote-excel-status','ctrl-mc-check'].forEach(id=>{ const e=document.getElementById(id); if(e) e.textContent=''; });
@@ -4884,6 +4902,27 @@ function ctrlChartCard(title, sub, svg){
     ${svg}</div>`;
 }
 
+/* Bloque "de donde salio lo real": archivo de Jobs, Job ID, hoja y fila.
+   Las comparaciones guardadas antes de este cambio no traen real_origen:
+   se muestran como no registrado en vez de inventar datos. */
+function ctrlOrigenRealHTML(h){
+  const esc = t => String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const caja = inner => '<div style="border:1px solid var(--line);border-radius:8px;background:var(--paper-raised);padding:10px 14px;margin:0 0 18px;font-size:12.5px;line-height:1.8;">'
+    + '<div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:2px;">Origen de los datos reales</div>'
+    + inner + '</div>';
+  const o = (h && h.real_origen) ? h.real_origen : null;
+  if(!o) return caja('<span style="color:var(--muted);">No registrado. Esta comparacion se guardo antes de que el portal anotara el archivo de Jobs y el Job ID.</span>');
+  const p = [];
+  p.push('Archivo de Jobs: <strong>' + (o.archivo ? esc(o.archivo) : '—') + '</strong>');
+  p.push('Job ID: <strong class="mono">' + (o.job ? esc(o.job) : '—') + '</strong>');
+  if(o.descripcion) p.push('Producto en el Job: ' + esc(o.descripcion));
+  if(o.cliente) p.push('Cliente en el Job: ' + esc(o.cliente));
+  if(o.qty) p.push('Cantidad del Job: ' + qty(o.qty) + ' pza');
+  if(o.hoja) p.push('Hoja: ' + esc(o.hoja));
+  if(o.fila) p.push('Fila: ' + o.fila);
+  if(o.cargado) p.push('Cargado: ' + esc(o.cargado));
+  return caja(p.join(' &nbsp;·&nbsp; '));
+}
 function ctrlShowDetail(id){
   const h = (DB.controllerHistory||[]).find(x=>x.id===id);
   if(!h) return;
@@ -4926,6 +4965,7 @@ function ctrlShowDetail(id){
       </div>
     </div>
     ${meta?`<div style="font-size:11.5px;color:var(--muted);margin:-8px 0 18px;">${meta}</div>`:''}
+    ${ctrlOrigenRealHTML(h)}
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;margin-bottom:22px;">${scorecards}</div>
     ${ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado. El % de la derecha es la desviación.', ctrlChartBars(h.quoted, h.real))}
     ${ctrlChartCard('Qué movió la desviación','Peso en pesos de cada rubro. A la izquierda lo que ahorraste, a la derecha lo que se te fue.', ctrlChartDeviation(h.quoted, h.real))}
@@ -4986,12 +5026,12 @@ function ctrlExportHistory(){
   resumen.push(['Jobs por DEBAJO o en costo', list.length-overs]);
 
   /* ---- Hoja 2: Detalle ---- */
-  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza','MC% real: origen','MC% reportado Job','Transporte real capturado','Origen CVT real'];
+  const headers = ['Fecha','Cliente','Cotización','Producto','Cantidad','Base del cotizado','Fuente del Excel','PEDIDO B31','Precio comprometido/pza','MC% real: origen','MC% reportado Job','Transporte real capturado','Origen CVT real','Archivo de Jobs','Job ID','Producto en el Job'];
   rubros.forEach(([label])=>headers.push(label+' Cot', label+' Real', label+' Dif $', label+' Dif %'));
   headers.push('MC% Cot','MC% Real','MC% Dif (pp)','Precio/pza Cot','Precio/pza Real','Precio/pza Dif');
   const detalle = [headers];
   list.forEach(h=>{
-    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado), h.real?.mc_formula||'—', n(h.real?.mc_reportado), (h.real && h.real.transporte_capturado) ? 'Si' : 'No', (h.real && h.real.cvt_origen) || '—'];
+    const row = [h.date, h.client_name, h.quote_number, h.product_name, n(h.tier_qty), h.modo||'—', h.fuente||'—', n(h.pedido_b31), n(h.precio_cotizado), h.real?.mc_formula||'—', n(h.real?.mc_reportado), (h.real && h.real.transporte_capturado) ? 'Si' : 'No', (h.real && h.real.cvt_origen) || '—', (h.real_origen && h.real_origen.archivo) || '—', (h.real_origen && h.real_origen.job) || '—', (h.real_origen && h.real_origen.descripcion) || '—'];
     rubros.forEach(([label,key])=>{
       row.push(n(h.quoted?.[key]), n(h.real?.[key]), dif(h.real?.[key],h.quoted?.[key]), difp(h.real?.[key],h.quoted?.[key]));
     });
