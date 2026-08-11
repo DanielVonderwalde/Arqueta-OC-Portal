@@ -3903,7 +3903,8 @@ function ctrlClear(){
 }
 
 let ctrlJobsData = []; // Parsed jobs from Excel
-let ctrlJobMC = null;  // MC% tal como lo reporta el Job (columna Z)
+let ctrlJobMC = null;
+let ctrlVentaOrigen = '';   // de donde salio el Valor de Venta real (leido o calculado)  // MC% tal como lo reporta el Job (columna Z)
 let ctrlJobsArchivo = ''; // nombre del Excel de Jobs cargado
 let ctrlJobsHoja = '';    // hoja de la que se leyeron los jobs
 let ctrlJobOrigen = null; // de que archivo/job vienen los datos reales en pantalla
@@ -3922,6 +3923,83 @@ function ctrlTransporteInline(v){
   if(el){ el.focus(); try{ el.select(); }catch(e){} }
 }
 function ctrlCvtTocado(){ ctrlCvtManual = true; }
+/* ---- Mapa de columnas del Cost Report ----------------------------------
+   Antes se leian posiciones fijas (C = Job, D = Descripcion, R = Invoicing).
+   Si el reporte trae una columna de mas o de menos todo se recorre: el Job ID
+   sale mal y el Valor de Venta se va en blanco. Ahora se busca por nombre de
+   encabezado y la posicion historica queda solo como respaldo.            */
+let ctrlJobsMapa = null;
+
+function ctrlMapaColumnas(rows){
+  const LETRA = s => { let n=0; for(const c of s.toUpperCase()) n = n*26 + (c.charCodeAt(0)-64); return n-1; };
+  const DEF = { ordered:'A', customer:'B', job:'C', description:'D',
+                qty_pro:'AG', invoicing:'R', mc_pct:'Z', paper:'AH',
+                outside_svc:'AF', other_mat:'AD', all_mat:'AE',
+                wage:'AJ', machines:'AI', overheads:'AO', total_normal:'AW' };
+  const ALIAS = {
+    ordered:      ['ORDERED','ORDER DATE','FECHA','DATE'],
+    customer:     ['CUSTOMER','CLIENTE','CLIENT'],
+    job:          ['JOB','JOB ID','JOB NO','JOB NO.','JOB NUMBER','JOB #','NO. JOB','ORDEN','OP'],
+    description:  ['JOB DESCRIPTION','DESCRIPTION','DESCRIPCION','PRODUCTO','PRODUCT'],
+    qty_pro:      ['QTY/PRO','QTY PRO','QTY PRODUCED','CANTIDAD','PIEZAS'],
+    invoicing:    ['INVOICING VALUE','INVOICING','VALOR VENTA','VALOR DE VENTA','SALES VALUE','NET SALES','FACTURACION','VENTA'],
+    mc_pct:       ['MC%','MC %','MC','MARGEN','MARGIN'],
+    paper:        ['PAPER','PAPEL','SUSTRATO'],
+    outside_svc:  ['OUTSIDE SERVICES','OUTSIDE SERVICE','SERVICIOS EXTERNOS','ACABADO'],
+    other_mat:    ['OTHER MATERIALS','OTROS MATERIALES'],
+    all_mat:      ['ALL MATERIALS','TOTAL MATERIALS','TOTAL INSUMOS'],
+    wage:         ['WAGE COST','WAGE','MOD','MANO DE OBRA'],
+    machines:     ['MACHINES','MACHINE COST','EE','MAQUINAS'],
+    overheads:    ['OVERHEADS','OVERHEAD','GASTOS INDIRECTOS'],
+    total_normal: ['TOTAL (NORMAL)','TOTAL NORMAL','TOTAL COST','TOTAL']
+  };
+  const norm = v => String(v==null?'':v).replace(/\s+/g,' ').trim().toUpperCase();
+
+  /* La fila de encabezado es, de las primeras 10, la que reconoce mas nombres */
+  let headerRow = 0, mejor = 0;
+  for(let r=0; r<Math.min(10, rows.length); r++){
+    const celdas = (rows[r]||[]).map(norm);
+    let score = 0;
+    Object.keys(ALIAS).forEach(k=>{ if(celdas.some(c => ALIAS[k].indexOf(c) >= 0)) score++; });
+    if(score > mejor){ mejor = score; headerRow = r; }
+  }
+  const celdas = (rows[headerRow]||[]).map(norm);
+  const mapa = {}, detectadas = {};
+  Object.keys(DEF).forEach(campo=>{
+    let idx = -1;
+    for(const nombre of ALIAS[campo]){ idx = celdas.indexOf(nombre); if(idx>=0) break; }
+    if(idx < 0){   /* segundo intento: encabezado que empieza igual */
+      for(const nombre of ALIAS[campo]){
+        idx = celdas.findIndex(c => c && c.indexOf(nombre) === 0);
+        if(idx >= 0) break;
+      }
+    }
+    mapa[campo] = idx >= 0 ? idx : LETRA(DEF[campo]);
+    detectadas[campo] = idx >= 0;
+  });
+  mapa._headerRow  = headerRow;
+  mapa._porNombre  = mejor;
+  mapa._detectadas = detectadas;
+  return mapa;
+}
+
+/* Numero tolerante: acepta "$ 1,234.50", " 1234 ", null o texto vacio */
+function ctrlNum(v){
+  if(v === null || v === undefined) return 0;
+  if(typeof v === 'number') return isNaN(v) ? 0 : v;
+  const s = String(v).replace(/[^0-9.\-]/g,'');
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
+/* Letra de columna de Excel a partir del indice, para mostrarla en pantalla */
+function ctrlLetraCol(idx){
+  if(idx === null || idx === undefined || idx < 0) return '';
+  let s = '', n = idx + 1;
+  while(n > 0){ const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - m) / 26); }
+  return s;
+}
+
 function ctrlLoadJobs(input){
   const file = input.files[0];
   if(!file) return;
@@ -3940,27 +4018,35 @@ function ctrlLoadJobs(input){
       ctrlJobsArchivo = file.name || '';
       ctrlJobsHoja = sheetName || '';
       ctrlJobOrigen = null;
-      for(let r=1; r<rows.length; r++){
+      /* Las columnas se detectan por encabezado (Job ID puede venir en B o en C
+         segun el reporte). ctrlNum limpia "$", comas y espacios: sin eso el
+         Valor de Venta llegaba vacio cuando el Excel lo traia como texto. */
+      const MAP = ctrlMapaColumnas(rows);
+      ctrlJobsMapa = MAP;
+      const val = (row, campo) => row[MAP[campo]];
+
+      for(let r = MAP._headerRow + 1; r < rows.length; r++){
         const row = rows[r];
-        if(!row || !row[2]) continue; // Skip if no Job number (col C)
+        if(!row) continue;
+        const jobId = val(row,'job');
+        if(jobId === null || jobId === undefined || String(jobId).trim() === '') continue;
         ctrlJobsData.push({
           rowIdx: r,
-          ordered: row[0]||'',
-          customer: row[1]||'',
-          job: row[2]||'',
-          description: row[3]||'',
-          // Cost columns
-          qty_pro: Number(row[32])||0,      // AG - QTY/PRO
-          invoicing: Number(row[17])||0,     // R - Invoicing value
-          mc_pct: Number(row[25])||0,        // Z - MC%
-          paper: Number(row[33])||0,         // AH - Paper
-          outside_svc: Number(row[31])||0,   // AF - Outside Services
-          other_mat: Number(row[29])||0,     // AD - Other materials
-          all_mat: Number(row[30])||0,       // AE - All materials
-          wage: Number(row[35])||0,          // AJ - Wage cost
-          machines: Number(row[34])||0,      // AI - Machines
-          overheads: Number(row[40])||0,     // AO - Overheads
-          total_normal: Number(row[48])||0,  // AW - Total (normal)
+          ordered:      val(row,'ordered') || '',
+          customer:     val(row,'customer') || '',
+          job:          jobId,
+          description:  val(row,'description') || '',
+          qty_pro:      ctrlNum(val(row,'qty_pro')),
+          invoicing:    ctrlNum(val(row,'invoicing')),
+          mc_pct:       ctrlNum(val(row,'mc_pct')),
+          paper:        ctrlNum(val(row,'paper')),
+          outside_svc:  ctrlNum(val(row,'outside_svc')),
+          other_mat:    ctrlNum(val(row,'other_mat')),
+          all_mat:      ctrlNum(val(row,'all_mat')),
+          wage:         ctrlNum(val(row,'wage')),
+          machines:     ctrlNum(val(row,'machines')),
+          overheads:    ctrlNum(val(row,'overheads')),
+          total_normal: ctrlNum(val(row,'total_normal'))
         });
       }
 
@@ -3976,7 +4062,15 @@ function ctrlLoadJobs(input){
         return '<option value="' + i + '">' + esc(partes.join(' · ')) + '</option>';
       }).join('');
       document.getElementById('ctrl-job-selector').style.display='';
-      statusEl.textContent = ctrlJobsData.length+' jobs encontrados en "'+sheetName+'".';
+      const detOK = ctrlJobsMapa && ctrlJobsMapa._porNombre >= 4;
+      statusEl.textContent = ctrlJobsData.length + ' jobs encontrados en "' + sheetName + '"'
+        + (detOK
+            ? ' · columnas leidas por encabezado (fila ' + (ctrlJobsMapa._headerRow + 1)
+              + '): Job ID = col ' + ctrlLetraCol(ctrlJobsMapa.job)
+              + ', descripcion = col ' + ctrlLetraCol(ctrlJobsMapa.description)
+              + ', valor de venta = col ' + ctrlLetraCol(ctrlJobsMapa.invoicing) + '.'
+            : ' · OJO: no se reconocieron los encabezados, se usaron posiciones fijas. Verifica Job ID y Valor de Venta.');
+      statusEl.style.color = detOK ? '' : 'var(--brick)';
       showToast(ctrlJobsData.length+' jobs cargados');
     }catch(err){
       statusEl.textContent = 'Error: '+err.message;
@@ -4000,6 +4094,8 @@ function ctrlJobSelected(){
     cliente: j.customer || '',
     qty: j.qty_pro || null,
     fila: (j.rowIdx != null) ? (j.rowIdx + 1) : null,
+    col_job: ctrlJobsMapa ? ctrlLetraCol(ctrlJobsMapa.job) : '',
+    col_desc: ctrlJobsMapa ? ctrlLetraCol(ctrlJobsMapa.description) : '',
     cargado: (typeof ahoraMX === 'function') ? ahoraMX() : ''
   };
   // Auto-fill all real fields
@@ -4009,7 +4105,24 @@ function ctrlJobSelected(){
   if(autoQty && autoQty.checked && j.qty_pro){
     ponerNumero(document.getElementById('ctrl-tier'), j.qty_pro);
   }
-  document.getElementById('ctrl-real-venta').value = j.invoicing || '';
+  /* Valor de Venta real. Si el cost report no lo trae legible se reconstruye,
+     en este orden: Invoicing -> cantidad x precio cotizado -> CVT / (1 - MC%).
+     Siempre queda anotado de donde salio para que se pueda auditar. */
+  let venta = j.invoicing || 0;
+  ctrlVentaOrigen = 'Invoicing del cost report (col ' + (ctrlJobsMapa ? ctrlLetraCol(ctrlJobsMapa.invoicing) : '?') + ')';
+  if(!venta){
+    const precio = (typeof ctrlPrecioCotizado === 'function') ? ctrlPrecioCotizado() : null;
+    if(j.qty_pro && precio){
+      venta = Math.round(j.qty_pro * precio * 100) / 100;
+      ctrlVentaOrigen = 'calculado: ' + qty(j.qty_pro) + ' pza x ' + money(precio) + '/pza';
+    } else if(j.total_normal && j.mc_pct > 0 && j.mc_pct < 1){
+      venta = Math.round(j.total_normal / (1 - j.mc_pct) * 100) / 100;
+      ctrlVentaOrigen = 'calculado: CVT / (1 - MC%)';
+    } else {
+      ctrlVentaOrigen = 'no se pudo leer ni calcular — captúralo a mano';
+    }
+  }
+  document.getElementById('ctrl-real-venta').value = venta || '';
   ctrlJobMC = j.mc_pct ? j.mc_pct*100 : null;   // MC% que reporta el Job (col Z)
   document.getElementById('ctrl-real-mc').value = j.mc_pct ? (j.mc_pct*100).toFixed(1) : '';
   document.getElementById('ctrl-real-precio').value = (j.qty_pro && j.invoicing) ? (j.invoicing/j.qty_pro).toFixed(2) : '';
@@ -4389,6 +4502,20 @@ function ctrlGetRealData(){
     real.cvt = sumaRubros;
     real.cvt_origen = (sumaRubros === null) ? 'sin dato' : 'suma de rubros + transporte';
   }
+  /* Red de seguridad del Valor de Venta: si quedo vacio (Excel ilegible o
+     campo borrado) se reconstruye antes de calcular MC% y guardar. */
+  if(real.venta === null || real.venta === undefined || real.venta === 0){
+    const precio = (typeof ctrlPrecioCotizado === 'function') ? ctrlPrecioCotizado() : null;
+    const cant = real.qty || leerNumero(document.getElementById('ctrl-tier'));
+    if(cant && precio){
+      real.venta = Math.round(cant * precio * 100) / 100;
+      ctrlVentaOrigen = 'calculado: ' + qty(cant) + ' pza x ' + money(precio) + '/pza';
+    } else if(real.cvt && real.mc > 0 && real.mc < 100){
+      real.venta = Math.round(real.cvt / (1 - real.mc/100) * 100) / 100;
+      ctrlVentaOrigen = 'calculado: CVT / (1 - MC%)';
+    }
+  }
+  real.venta_origen = ctrlVentaOrigen || (real.venta ? 'capturado a mano' : 'sin dato');
   const same = (document.getElementById('ctrl-mc-same')||{}).checked;
   real.mc_formula = same ? 'calculado' : 'reportado (col Z)';
   if(same && real.venta && real.cvt!==null && real.cvt!==undefined){
@@ -4565,12 +4692,15 @@ function ctrlRenderHistory(){
       : '';
   }
   if(!list.length){ wrap.innerHTML='<div class="empty" style="padding:20px;">Sin comparaciones en este filtro</div>'; return; }
-  wrap.innerHTML = `<table><thead><tr><th>Fecha</th><th>Cliente</th><th>Cotización</th><th>Producto</th><th>Cantidad</th><th>CVT Cotizado</th><th>CVT Real</th><th>Desviación</th><th></th></tr></thead><tbody>
+  wrap.innerHTML = `<table><thead><tr><th>Fecha</th><th>Cliente</th><th>Cotización</th><th>Job ID</th><th>Job description</th><th>Producto</th><th>Cantidad</th><th>CVT Cotizado</th><th>CVT Real</th><th>Desviación</th><th></th></tr></thead><tbody>
   ${list.map(h=>{
     const diff = (h.real?.cvt!==null && h.real?.cvt!==undefined && h.quoted?.cvt) ? ((h.real.cvt-h.quoted.cvt)/h.quoted.cvt*100) : null;
     const color = diff===null?'':diff<=0?'color:var(--teal);font-weight:700;':'color:var(--brick);font-weight:700;';
     return `<tr style="cursor:pointer;" onclick="ctrlShowDetail('${h.id}')">
-      <td>${h.date||'—'}</td><td>${h.client_name}</td><td class="mono">${h.quote_number}</td><td>${h.product_name||''}</td>
+      <td>${h.date||'—'}</td><td>${h.client_name}</td><td class="mono">${h.quote_number}</td>
+      <td class="mono">${(h.real_origen&&h.real_origen.job)||'—'}</td>
+      <td>${(h.real_origen&&h.real_origen.descripcion)||'—'}</td>
+      <td>${h.product_name||''}</td>
       <td class="mono">${qty(h.tier_qty)} pza</td>
       <td class="mono">${money(h.quoted?.cvt)}</td>
       <td class="mono">${h.real?.cvt!==null&&h.real?.cvt!==undefined?money(h.real.cvt):'—'}</td>
@@ -4923,22 +5053,144 @@ function ctrlOrigenRealHTML(h){
   if(o.cargado) p.push('Cargado: ' + esc(o.cargado));
   return caja(p.join(' &nbsp;·&nbsp; '));
 }
+/* ---------- Edicion del detalle (solo administrador) -------------------
+   El ojito abre la comparacion en lectura. Con "Editar valores" los campos
+   se vuelven capturables para corregir lo que el Excel no se dejo leer
+   (tipico: el Valor de Venta) y para escribir a mano el Job ID y la
+   descripcion en comparaciones viejas que no traen real_origen.
+   Al guardar se recalcula MC% y queda la marca de cuando se edito.      */
+let ctrlDetailId = null;
+let ctrlDetailEdit = false;
+
+const CTRL_CAMPOS = [
+  {key:'papel',      label:'Papel/Sustrato'},
+  {key:'acabado',    label:'Acabado'},
+  {key:'materiales', label:'Materiales'},
+  {key:'insumos',    label:'Total Insumos', bold:true},
+  {key:'mod',        label:'MOD'},
+  {key:'ee',         label:'EE/Máquinas'},
+  {key:'overhead',   label:'Overhead'},
+  {key:'transporte', label:'Transporte'},
+  {key:'cvt',        label:'CVT', bold:true},
+  {key:'venta',      label:'Valor de Venta', bold:true},
+  {key:'mc',         label:'MC%', isPct:true}
+];
+
+function ctrlEscAttr(t){
+  return String(t === null || t === undefined ? '' : t)
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function ctrlInputCelda(lado, key, valor, isPct){
+  const v = (valor === null || valor === undefined) ? '' : valor;
+  return '<input id="ed-' + lado + '-' + key + '" class="mono" type="text" inputmode="decimal"'
+       + ' value="' + v + '" placeholder="' + (isPct ? '%' : '$') + '"'
+       + ' style="width:112px;text-align:right;padding:4px 6px;border:1px solid var(--line);'
+       + 'border-radius:6px;background:var(--paper);font-size:12.5px;">';
+}
+
+function ctrlToggleEdit(){
+  if(currentRole !== 'admin'){ showToast('Solo el administrador puede editar'); return; }
+  ctrlDetailEdit = !ctrlDetailEdit;
+  ctrlShowDetail(ctrlDetailId);
+}
+
+function ctrlEdNum(el){
+  if(!el) return undefined;
+  const v = String(el.value || '').replace(/[^0-9.\-]/g,'');
+  return v === '' ? null : Number(v);
+}
+
+/* Rellena en pantalla lo que se pueda deducir, sin guardar todavia */
+function ctrlDetailRecalcular(){
+  const g = id => document.getElementById(id);
+  ['cot','real'].forEach(lado=>{
+    const rubros = ['papel','acabado','materiales','mod','ee','overhead','transporte'];
+    if(ctrlEdNum(g('ed-' + lado + '-cvt')) === null){
+      const partes = rubros.map(k => ctrlEdNum(g('ed-' + lado + '-' + k)));
+      if(partes.some(v => v !== null && v !== undefined)){
+        g('ed-' + lado + '-cvt').value = Math.round(partes.reduce((s,v)=>s+(v||0),0) * 100) / 100;
+      }
+    }
+    const cvt = ctrlEdNum(g('ed-' + lado + '-cvt'));
+    let venta = ctrlEdNum(g('ed-' + lado + '-venta'));
+    const mc  = ctrlEdNum(g('ed-' + lado + '-mc'));
+    if((venta === null || venta === 0) && cvt !== null && mc !== null && mc > 0 && mc < 100){
+      venta = Math.round(cvt / (1 - mc/100) * 100) / 100;
+      g('ed-' + lado + '-venta').value = venta;
+    }
+    if(mc === null && venta && cvt !== null){
+      g('ed-' + lado + '-mc').value = Math.round((venta - cvt) / venta * 1000) / 10;
+    }
+  });
+  showToast('Campos vacíos recalculados — revisa antes de guardar');
+}
+
+function ctrlDetailSave(){
+  if(currentRole !== 'admin'){ showToast('Solo el administrador puede editar'); return; }
+  const h = (DB.controllerHistory || []).find(x => x.id === ctrlDetailId);
+  if(!h) return;
+  h.quoted = h.quoted || {};
+  h.real   = h.real   || {};
+
+  CTRL_CAMPOS.forEach(c=>{
+    const q = ctrlEdNum(document.getElementById('ed-cot-'  + c.key));
+    const r = ctrlEdNum(document.getElementById('ed-real-' + c.key));
+    if(q !== undefined) h.quoted[c.key] = q;
+    if(r !== undefined) h.real[c.key]   = r;
+  });
+
+  /* Job ID y Job description del cost report: tambien se corrigen aqui */
+  const gj = document.getElementById('ed-job');
+  const gd = document.getElementById('ed-jobdesc');
+  if(gj || gd){
+    h.real_origen = h.real_origen || {};
+    if(gj) h.real_origen.job         = String(gj.value || '').trim();
+    if(gd) h.real_origen.descripcion = String(gd.value || '').trim();
+    h.real_origen.editado_a_mano = true;
+  }
+
+  /* Si el Valor de Venta sigue vacio se intenta reconstruir */
+  if(h.real.venta === null || h.real.venta === undefined || h.real.venta === 0){
+    if(h.tier_qty && h.precio_cotizado){
+      h.real.venta = Math.round(h.tier_qty * h.precio_cotizado * 100) / 100;
+      h.real.venta_origen = 'calculado al editar: cantidad x precio cotizado';
+    } else if(h.real.cvt && h.real.mc > 0 && h.real.mc < 100){
+      h.real.venta = Math.round(h.real.cvt / (1 - h.real.mc/100) * 100) / 100;
+      h.real.venta_origen = 'calculado al editar: CVT / (1 - MC%)';
+    }
+  } else {
+    h.real.venta_origen = 'capturado a mano';
+  }
+
+  /* MC% se recalcula solo cuando quedo vacio y hay con que */
+  ['quoted','real'].forEach(lado=>{
+    const o = h[lado];
+    if(o && o.venta && o.cvt !== null && o.cvt !== undefined && (o.mc === null || o.mc === undefined)){
+      o.mc = (o.venta - o.cvt) / o.venta * 100;
+    }
+  });
+
+  h.editado = { cuando: (typeof ahoraMX === 'function') ? ahoraMX() : '', rol: currentRole };
+  saveData();
+  ctrlDetailEdit = false;
+  ctrlShowDetail(h.id);
+  ctrlRenderHistory();
+  showToast('Comparación actualizada');
+}
+
 function ctrlShowDetail(id){
   const h = (DB.controllerHistory||[]).find(x=>x.id===id);
   if(!h) return;
-  const rows = [
-    {label:'Papel/Sustrato', cot:h.quoted?.papel, real:h.real?.papel},
-    {label:'Acabado', cot:h.quoted?.acabado, real:h.real?.acabado},
-    {label:'Materiales', cot:h.quoted?.materiales, real:h.real?.materiales},
-    {label:'Total Insumos', cot:h.quoted?.insumos, real:h.real?.insumos, bold:true},
-    {label:'MOD', cot:h.quoted?.mod, real:h.real?.mod},
-    {label:'EE/Máquinas', cot:h.quoted?.ee, real:h.real?.ee},
-    {label:'Overhead', cot:h.quoted?.overhead, real:h.real?.overhead},
-    {label:'Transporte', cot:h.quoted?.transporte, real:h.real?.transporte},
-    {label:'CVT', cot:h.quoted?.cvt, real:h.real?.cvt, bold:true},
-    {label:'Valor de Venta', cot:h.quoted?.venta, real:h.real?.venta, bold:true},
-    {label:'MC%', cot:h.quoted?.mc, real:h.real?.mc, isPct:true},
-  ];
+  ctrlDetailId = h.id;
+  const editable = ctrlDetailEdit && currentRole === 'admin';
+  /* Los rubros salen de CTRL_CAMPOS para que la vista y la edicion usen
+     exactamente las mismas llaves de quoted/real. */
+  const rows = CTRL_CAMPOS.map(c => ({
+    key: c.key, label: c.label, bold: c.bold, isPct: c.isPct,
+    cot:  h.quoted ? h.quoted[c.key] : undefined,
+    real: h.real   ? h.real[c.key]   : undefined
+  }));
   const keyRows = rows.filter(r=>r.bold||r.isPct);
   const scorecards = keyRows.map(r=>ctrlScorecard(r, {big:true})).join('');
   const cvtDif = (h.real?.cvt!==null && h.real?.cvt!==undefined && h.quoted?.cvt) ? (h.real.cvt-h.quoted.cvt) : null;
@@ -4966,22 +5218,49 @@ function ctrlShowDetail(id){
     </div>
     ${meta?`<div style="font-size:11.5px;color:var(--muted);margin:-8px 0 18px;">${meta}</div>`:''}
     ${ctrlOrigenRealHTML(h)}
+    ${currentRole === 'admin' ? `
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 16px;">
+      <button class="btn btn-ghost" onclick="ctrlToggleEdit()">${editable ? '✕ Cancelar edición' : '✎ Editar valores'}</button>
+      ${editable ? '<button class="btn btn-ghost" onclick="ctrlDetailRecalcular()">∑ Rellenar vacíos</button>' : ''}
+      ${editable ? '<button class="btn btn-primary" onclick="ctrlDetailSave()">Guardar cambios</button>' : ''}
+      ${h.editado ? '<span class="small-note" style="margin-left:auto;">Editado a mano: ' + h.editado.cuando + '</span>' : ''}
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:0 0 20px;">
+      <div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px;">Job ID · cost report${(h.real_origen && h.real_origen.col_job) ? ' (col ' + h.real_origen.col_job + ')' : ''}</div>
+        ${editable
+          ? '<input id="ed-job" class="mono" type="text" value="' + ctrlEscAttr(h.real_origen && h.real_origen.job) + '" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--paper);">'
+          : '<div class="mono" style="font-size:16px;font-weight:700;">' + (ctrlEscAttr(h.real_origen && h.real_origen.job) || '—') + '</div>'}
+      </div>
+      <div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px;">Job description${(h.real_origen && h.real_origen.col_desc) ? ' (col ' + h.real_origen.col_desc + ')' : ''}</div>
+        ${editable
+          ? '<input id="ed-jobdesc" type="text" value="' + ctrlEscAttr(h.real_origen && h.real_origen.descripcion) + '" style="width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--paper);">'
+          : '<div style="font-size:16px;font-weight:700;">' + (ctrlEscAttr(h.real_origen && h.real_origen.descripcion) || '—') + '</div>'}
+      </div>
+      <div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:3px;">Origen del valor de venta</div>
+        <div style="font-size:12.5px;color:var(--muted);line-height:1.5;">${ctrlEscAttr((h.real && h.real.venta_origen) || 'no registrado')}</div>
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:12px;margin-bottom:22px;">${scorecards}</div>
     ${ctrlChartCard('Costo por rubro: cotizado vs real','Cada rubro con su barra de expectativa y de resultado. El % de la derecha es la desviación.', ctrlChartBars(h.quoted, h.real))}
     ${ctrlChartCard('Qué movió la desviación','Peso en pesos de cada rubro. A la izquierda lo que ahorraste, a la derecha lo que se te fue.', ctrlChartDeviation(h.quoted, h.real))}
     ${ctrlChartCard('Composición del costo','En qué se va cada peso del costo variable, cotizado contra real.', ctrlChartComposition(h.quoted, h.real))}
     <table><thead><tr><th>Rubro</th><th style="text-align:right;">Cotizado</th><th style="text-align:right;">Real</th><th style="text-align:right;">Diferencia $</th><th style="text-align:right;">Diferencia %</th></tr></thead><tbody>
     ${rows.map(r=>{
-      const diff = (r.real!==null&&r.real!==undefined&&r.cot!==null) ? r.real-r.cot : null;
-      const diffPct = (diff!==null&&r.cot) ? (diff/r.cot*100) : null;
+      const diff = (r.real!==null && r.real!==undefined && r.cot!==null && r.cot!==undefined) ? r.real-r.cot : null;
+      const diffPct = (diff!==null && r.cot) ? (diff/r.cot*100) : null;
       const color = diff===null?'':r.isPct?(diff>=0?'color:var(--teal);':'color:var(--brick);'):(diff<=0?'color:var(--teal);':'color:var(--brick);');
       const bg = r.bold?'background:var(--paper-raised);':'';
+      const fmt = v => (v===null||v===undefined) ? '—' : (r.isPct ? Number(v).toFixed(1)+'%' : money(v));
       return `<tr style="${bg}"><td style="${r.bold?'font-weight:700;':''}">${r.label}</td>
-        <td class="mono" style="text-align:right;">${r.isPct?r.cot?.toFixed(1)+'%':money(r.cot)}</td>
-        <td class="mono" style="text-align:right;">${r.real!==null&&r.real!==undefined?(r.isPct?r.real.toFixed(1)+'%':money(r.real)):'—'}</td>
+        <td class="mono" style="text-align:right;${r.bold?'font-weight:700;':''}">${editable ? ctrlInputCelda('cot', r.key, r.cot, r.isPct) : fmt(r.cot)}</td>
+        <td class="mono" style="text-align:right;${r.bold?'font-weight:700;':''}">${editable ? ctrlInputCelda('real', r.key, r.real, r.isPct) : fmt(r.real)}</td>
         <td class="mono" style="text-align:right;${color}">${diff!==null?(r.isPct?(diff>=0?'+':'')+diff.toFixed(1)+'pp':money(diff)):'—'}</td>
-        <td class="mono" style="text-align:right;${color}">${diffPct!==null&&!r.isPct?(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%':'—'}</td></tr>`;
+        <td class="mono" style="text-align:right;${color}">${diffPct!==null?(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%':'—'}</td></tr>`;
     }).join('')}
+    ${editable ? '<tr><td colspan="5" class="small-note" style="padding-top:10px;">Captura los valores y pulsa <strong>Guardar cambios</strong>. El botón “Rellenar vacíos” deduce CVT, Valor de Venta y MC% con la información que ya existe.</td></tr>' : ''}
     </tbody></table>`;
   document.getElementById('modal-ctrl-detail').classList.add('active');
 }
