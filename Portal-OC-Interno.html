@@ -5084,9 +5084,11 @@ function ctrlEscAttr(t){
 function ctrlInputCelda(lado, key, valor, isPct){
   const v = (valor === null || valor === undefined) ? '' : valor;
   return '<input id="ed-' + lado + '-' + key + '" class="mono" type="text" inputmode="decimal"'
+       + ' oninput="ctrlAutoSuma(\'' + lado + '\')"'
+       + (CTRL_DERIVADOS.indexOf(key) >= 0 ? ' title="Se recalcula solo con las sumas"' : '')
        + ' value="' + v + '" placeholder="' + (isPct ? '%' : '$') + '"'
        + ' style="width:112px;text-align:right;padding:4px 6px;border:1px solid var(--line);'
-       + 'border-radius:6px;background:var(--paper);font-size:12.5px;">';
+       + 'border-radius:6px;background:' + (CTRL_DERIVADOS.indexOf(key) >= 0 ? '#F4F8FC' : 'var(--paper)') + ';font-size:12.5px;">';
 }
 
 function ctrlToggleEdit(){
@@ -5101,29 +5103,105 @@ function ctrlEdNum(el){
   return v === '' ? null : Number(v);
 }
 
-/* Rellena en pantalla lo que se pueda deducir, sin guardar todavia */
-function ctrlDetailRecalcular(){
-  const g = id => document.getElementById(id);
-  ['cot','real'].forEach(lado=>{
-    const rubros = ['papel','acabado','materiales','mod','ee','overhead','transporte'];
-    if(ctrlEdNum(g('ed-' + lado + '-cvt')) === null){
-      const partes = rubros.map(k => ctrlEdNum(g('ed-' + lado + '-' + k)));
-      if(partes.some(v => v !== null && v !== undefined)){
-        g('ed-' + lado + '-cvt').value = Math.round(partes.reduce((s,v)=>s+(v||0),0) * 100) / 100;
-      }
+/* ---------- Sumas automaticas del detalle del controller ----------
+   Total Insumos = Papel + Acabado + Materiales
+   CVT           = Total Insumos + MOD + EE + Overhead + Transporte
+   MC%           = (Valor de Venta - CVT) / Valor de Venta * 100
+   Se recalculan al escribir, al abrir el detalle y al guardar, asi que
+   aplica igual en las comparaciones nuevas y en todas las anteriores. */
+const CTRL_PARTES_INSUMOS = ['papel','acabado','materiales'];
+const CTRL_PARTES_CVT     = ['insumos','mod','ee','overhead','transporte'];
+const CTRL_DERIVADOS      = ['insumos','cvt','mc'];
+
+function ctrlRedondea2(n){ return Math.round(Number(n) * 100) / 100; }
+
+/* Suma las llaves que traigan numero. Devuelve null si ninguna trae dato. */
+function ctrlSumaPartes(o, llaves){
+  let total = 0, hay = false;
+  llaves.forEach(k => {
+    const v = o ? o[k] : null;
+    if(v === null || v === undefined || v === '') return;
+    const n = Number(v);
+    if(isNaN(n)) return;
+    total += n; hay = true;
+  });
+  return hay ? ctrlRedondea2(total) : null;
+}
+
+/* Recalcula los totales de un lado (el objeto quoted o el objeto real). */
+function ctrlSumaLado(o){
+  if(!o) return o;
+  const ins = ctrlSumaPartes(o, CTRL_PARTES_INSUMOS);
+  if(ins !== null) o.insumos = ins;
+  const cvt = ctrlSumaPartes(o, CTRL_PARTES_CVT);
+  if(cvt !== null) o.cvt = cvt;
+  const venta = Number(o.venta);
+  if(o.venta !== null && o.venta !== undefined && o.venta !== '' && !isNaN(venta) && venta > 0
+     && o.cvt !== null && o.cvt !== undefined){
+    o.mc = Math.round((venta - Number(o.cvt)) / venta * 1000) / 10;
+  }
+  return o;
+}
+
+/* Vuelve a pintar las columnas de diferencia mientras se edita. */
+function ctrlPintarDiferencias(){
+  CTRL_CAMPOS.forEach(c => {
+    const tdD = document.getElementById('dif-' + c.key);
+    const tdP = document.getElementById('difp-' + c.key);
+    if(!tdD && !tdP) return;
+    const q = ctrlEdNum(document.getElementById('ed-cot-'  + c.key));
+    const r = ctrlEdNum(document.getElementById('ed-real-' + c.key));
+    const hay = (q !== null && q !== undefined && !isNaN(q) && r !== null && r !== undefined && !isNaN(r));
+    const dif = hay ? (r - q) : null;
+    const pct = (dif !== null && q) ? (dif / q * 100) : null;
+    const col = (dif === null) ? ''
+      : (c.isPct ? (dif >= 0 ? 'var(--teal)' : 'var(--brick)')
+                 : (dif <= 0 ? 'var(--teal)' : 'var(--brick)'));
+    if(tdD){
+      tdD.textContent = (dif === null) ? '\u2014'
+        : (c.isPct ? ((dif >= 0 ? '+' : '') + dif.toFixed(1) + 'pp') : money(dif));
+      tdD.style.color = col;
     }
-    const cvt = ctrlEdNum(g('ed-' + lado + '-cvt'));
-    let venta = ctrlEdNum(g('ed-' + lado + '-venta'));
-    const mc  = ctrlEdNum(g('ed-' + lado + '-mc'));
-    if((venta === null || venta === 0) && cvt !== null && mc !== null && mc > 0 && mc < 100){
-      venta = Math.round(cvt / (1 - mc/100) * 100) / 100;
-      g('ed-' + lado + '-venta').value = venta;
-    }
-    if(mc === null && venta && cvt !== null){
-      g('ed-' + lado + '-mc').value = Math.round((venta - cvt) / venta * 1000) / 10;
+    if(tdP){
+      tdP.textContent = (pct === null) ? '\u2014' : ((pct >= 0 ? '+' : '') + pct.toFixed(1) + '%');
+      tdP.style.color = col;
     }
   });
-  showToast('Campos vacíos recalculados — revisa antes de guardar');
+}
+
+/* Suma en vivo sobre los inputs del detalle. lado: 'cot', 'real' o vacio. */
+function ctrlAutoSuma(lado){
+  if(!ctrlDetailEdit) return;
+  const lados = lado ? [lado] : ['cot','real'];
+  lados.forEach(ld => {
+    const g = k => document.getElementById('ed-' + ld + '-' + k);
+    const o = {};
+    CTRL_CAMPOS.forEach(c => {
+      const n = ctrlEdNum(g(c.key));
+      o[c.key] = (n === undefined || (typeof n === 'number' && isNaN(n))) ? null : n;
+    });
+    /* Sin valor de venta pero con MC%: se deduce el valor de venta. */
+    const cvtPrev = ctrlSumaPartes(o, CTRL_PARTES_CVT);
+    if((o.venta === null || o.venta === 0) && cvtPrev !== null
+       && o.mc !== null && o.mc > 0 && o.mc < 100){
+      o.venta = ctrlRedondea2(cvtPrev / (1 - o.mc / 100));
+    }
+    ctrlSumaLado(o);
+    ['insumos','cvt','venta','mc'].forEach(k => {
+      const el = g(k);
+      if(!el || o[k] === null || o[k] === undefined) return;
+      if(document.activeElement === el) return;
+      const txt = String(o[k]);
+      if(el.value !== txt) el.value = txt;
+    });
+  });
+  ctrlPintarDiferencias();
+}
+
+/* Fuerza el recalculo de los totales en pantalla, sin guardar todavia */
+function ctrlDetailRecalcular(){
+  ctrlAutoSuma();
+  showToast('Totales recalculados — revisa antes de guardar');
 }
 
 function ctrlDetailSave(){
@@ -5139,6 +5217,11 @@ function ctrlDetailSave(){
     if(q !== undefined) h.quoted[c.key] = q;
     if(r !== undefined) h.real[c.key]   = r;
   });
+
+  /* Los totales siempre se rearman a partir de los rubros, tambien en
+     comparaciones viejas: Total Insumos, CVT y MC%. */
+  ctrlSumaLado(h.quoted);
+  ctrlSumaLado(h.real);
 
   /* Job ID y Job description del cost report: tambien se corrigen aqui */
   const gj = document.getElementById('ed-job');
@@ -5221,7 +5304,7 @@ function ctrlShowDetail(id){
     ${currentRole === 'admin' ? `
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 16px;">
       <button class="btn btn-ghost" onclick="ctrlToggleEdit()">${editable ? '✕ Cancelar edición' : '✎ Editar valores'}</button>
-      ${editable ? '<button class="btn btn-ghost" onclick="ctrlDetailRecalcular()">∑ Rellenar vacíos</button>' : ''}
+      ${editable ? '<button class="btn btn-ghost" onclick="ctrlDetailRecalcular()">∑ Recalcular totales</button>' : ''}
       ${editable ? '<button class="btn btn-primary" onclick="ctrlDetailSave()">Guardar cambios</button>' : ''}
       ${h.editado ? '<span class="small-note" style="margin-left:auto;">Editado a mano: ' + h.editado.cuando + '</span>' : ''}
     </div>` : ''}
@@ -5257,12 +5340,13 @@ function ctrlShowDetail(id){
       return `<tr style="${bg}"><td style="${r.bold?'font-weight:700;':''}">${r.label}</td>
         <td class="mono" style="text-align:right;${r.bold?'font-weight:700;':''}">${editable ? ctrlInputCelda('cot', r.key, r.cot, r.isPct) : fmt(r.cot)}</td>
         <td class="mono" style="text-align:right;${r.bold?'font-weight:700;':''}">${editable ? ctrlInputCelda('real', r.key, r.real, r.isPct) : fmt(r.real)}</td>
-        <td class="mono" style="text-align:right;${color}">${diff!==null?(r.isPct?(diff>=0?'+':'')+diff.toFixed(1)+'pp':money(diff)):'—'}</td>
-        <td class="mono" style="text-align:right;${color}">${diffPct!==null?(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%':'—'}</td></tr>`;
+        <td class="mono" id="dif-${r.key}" style="text-align:right;${color}">${diff!==null?(r.isPct?(diff>=0?'+':'')+diff.toFixed(1)+'pp':money(diff)):'—'}</td>
+        <td class="mono" id="difp-${r.key}" style="text-align:right;${color}">${diffPct!==null?(diffPct>=0?'+':'')+diffPct.toFixed(1)+'%':'—'}</td></tr>`;
     }).join('')}
-    ${editable ? '<tr><td colspan="5" class="small-note" style="padding-top:10px;">Captura los valores y pulsa <strong>Guardar cambios</strong>. El botón “Rellenar vacíos” deduce CVT, Valor de Venta y MC% con la información que ya existe.</td></tr>' : ''}
+    ${editable ? '<tr><td colspan="5" class="small-note" style="padding-top:10px;">Captura los valores y pulsa <strong>Guardar cambios</strong>. Total Insumos, CVT y MC% se suman solos al escribir: si cambias Materiales cambia Total Insumos, y si cambias Transporte cambia el CVT. El botón “Recalcular totales” fuerza el recálculo.</td></tr>' : ''}
     </tbody></table>`;
   document.getElementById('modal-ctrl-detail').classList.add('active');
+  if(editable) ctrlAutoSuma();
 }
 function ctrlExportHistory(){
   const list = ctrlFilteredHistory();
@@ -5820,13 +5904,24 @@ function porCliente(){
 
 /* ---------- render ---------- */
 function spark(s){
-  var mx=1; for(var i=0;i<s.serie.length;i++) if(s.serie[i]>mx) mx=s.serie[i];
+  /* La escala incluye el mes en curso. Antes el mes en curso se dividia
+     entre el maximo del historial y, cuando el historial venia en ceros,
+     el alto salia en millones de por ciento y pintaba una barra gigante. */
+  var mx=1, i;
+  for(i=0;i<s.serie.length;i++) if(s.serie[i]>mx) mx=s.serie[i];
+  if(s.actual>mx) mx=s.actual;
+  var pcOf=function(v){
+    if(!(v>0)) return 3;
+    var p=Math.round(v/mx*100);
+    if(p>100) p=100;
+    if(p<10)  p=10;
+    return p;
+  };
   var h='<div class="crm-spark">';
   for(i=0;i<s.serie.length;i++){
-    var v=s.serie[i], pc=Math.round(v/mx*100);
-    h+='<i style="height:'+(v>0?Math.max(10,pc):3)+'%" title="'+esc(mLabel(C.meses[i])+': '+nf(v)+' pzas')+'"></i>';
+    h+='<i style="height:'+pcOf(s.serie[i])+'%" title="'+esc(mLabel(C.meses[i])+': '+nf(s.serie[i])+' pzas')+'"></i>';
   }
-  h+='<i class="on" style="height:'+(s.actual>0?Math.max(10,Math.round(s.actual/mx*100)):3)+'%" title="'+esc(mLabel(C.mesActual)+' (en curso): '+nf(s.actual)+' pzas')+'"></i>';
+  h+='<i class="on" style="height:'+pcOf(s.actual)+'%" title="'+esc(mLabel(C.mesActual)+' (en curso): '+nf(s.actual)+' pzas')+'"></i>';
   return h+'</div>';
 }
 function badge(e){ var d=EST[e]||EST.ventana; return '<span class="badge crm-b '+d.c+'">'+d.t+'</span>'; }
@@ -6039,7 +6134,7 @@ var SHELL=''
 
 var CSS=[
 '#view-crm .crm-spark{display:flex;align-items:flex-end;gap:2px;height:30px;width:130px}',
-'#view-crm .crm-spark i{flex:1 1 auto;min-width:3px;background:var(--kraft-soft);border-radius:1px}',
+'#view-crm .crm-spark i{flex:1 1 auto;min-width:3px;max-height:100%;background:var(--kraft-soft);border-radius:1px}',
 '#view-crm .crm-spark i.on{background:var(--kraft)}',
 '#view-crm .crm-b{white-space:nowrap}',
 '#view-crm .crm-ok{background:var(--teal-soft);color:var(--teal)}',
