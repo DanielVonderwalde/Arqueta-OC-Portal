@@ -291,6 +291,17 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
       </div>
       <div class="grid grid-5" style="margin-bottom:26px;" id="stat-cards"></div>
 
+      <!-- Resumen mensual de OCs por cliente -->
+      <div class="card crop" style="margin-bottom:26px;" id="rmc-card">
+        <div class="cm tl"></div><div class="cm tr"></div><div class="cm bl"></div><div class="cm br"></div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+          <h2 style="margin:0;">Valor de OCs por cliente</h2>
+          <div id="rmc-controls" style="margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center;"></div>
+        </div>
+        <div id="rmc-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 14px;"></div>
+        <div id="rmc-content"></div>
+      </div>
+
       <div class="quickactions">
         <button class="btn btn-primary" onclick="openQuoteModal()">+ Nueva cotización</button>
         <button class="btn btn-secondary" onclick="openClientModal()">+ Nuevo cliente</button>
@@ -1870,8 +1881,192 @@ function renderInicio(){
 
   document.getElementById('cd-newquote-btn').onclick = ()=> openQuoteModal(currentClientId);
 
+  renderResumenOCMensual();
+
   // OC Charts
   renderOCCharts();
+}
+
+/* =========================================================
+   RESUMEN MENSUAL DE OCs POR CLIENTE  (pantalla de Inicio)
+   Suma el valor de cada OC (cantidad x precio unitario) y lo
+   agrupa por cliente y por mes de registro, separando el monto
+   por estatus. "En produccion" son las OCs aceptadas
+   (status 'recibida'). Las rechazadas nunca suman.
+   ========================================================= */
+const RMC_ESTATUS = [
+  {k:'pendiente', label:'Pendiente',     color:'var(--kraft)'},
+  {k:'recibida',  label:'En producción', color:'var(--teal)'},
+  {k:'facturada', label:'Facturada',     color:'var(--muted)'}
+];
+const RMC_MESES_NOM = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+let rmcNMeses = 0;   // 0 = solo los meses que tienen OCs (dentro de los ultimos 12)
+let rmcHasta  = '';
+let rmcSel    = {pendiente:true, recibida:true, facturada:true};
+let rmcIVA    = false;
+
+function rmcValorOC(o){
+  return (o.lines||[]).reduce((s,l)=> s + (Number(l.quantity)||0)*(Number(l.unit_price)||0), 0);
+}
+function rmcMesLabel(ym){
+  const [y,m] = ym.split('-');
+  return RMC_MESES_NOM[Number(m)-1] + " '" + y.slice(2);
+}
+function rmcMesesConDatos(){
+  const set = new Set((DB.clientOCs||[]).map(o=>(o.date_submitted||'').slice(0,7)).filter(Boolean));
+  set.add(hoyMX().slice(0,7));
+  return [...set].sort();
+}
+function rmcRango(){
+  const disp  = rmcMesesConDatos();
+  const hasta = (rmcHasta && disp.indexOf(rmcHasta) >= 0) ? rmcHasta : disp[disp.length-1];
+  const n     = rmcNMeses || 12;
+  let meses = [];
+  let y = Number(hasta.slice(0,4)), m = Number(hasta.slice(5,7));
+  for(let i=0;i<n;i++){
+    meses.unshift(y + '-' + String(m).padStart(2,'0'));
+    if(--m === 0){ m = 12; y--; }
+  }
+  // "Solo meses con OCs": deja fuera los meses en blanco del rango
+  if(!rmcNMeses){
+    const conDatos = new Set(disp);
+    const filtrados = meses.filter(x=>conDatos.has(x));
+    if(filtrados.length) meses = filtrados;
+  }
+  return {meses, hasta, disp};
+}
+
+/* Devuelve la matriz cliente x mes ya lista para pintar o exportar. */
+function rmcCalcular(){
+  const {meses, hasta, disp} = rmcRango();
+  const dentro = new Set(meses);
+  const f = rmcIVA ? 1.16 : 1;
+  const porCliente = {};
+
+  (DB.clientOCs||[]).forEach(o=>{
+    const st = o.status || 'pendiente';
+    if(!rmcSel[st]) return;                       // estatus no seleccionado (incluye 'rechazada')
+    const ym = (o.date_submitted||'').slice(0,7);
+    if(!dentro.has(ym)) return;
+    const cl = clientById(o.client_id);
+    const nombre = cl ? cl.name : 'Sin cliente';
+    const r = porCliente[nombre] || (porCliente[nombre] = {
+      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, facturada:0}
+    });
+    const v = rmcValorOC(o) * f;
+    r.n++; r.total += v;
+    r.meses[ym] = (r.meses[ym]||0) + v;
+    if(r.est[st] !== undefined) r.est[st] += v;
+  });
+
+  const filas  = Object.values(porCliente).filter(r=>r.total > 0).sort((a,b)=>b.total - a.total);
+  const totMes = {}; meses.forEach(m=> totMes[m] = filas.reduce((s,r)=> s + (r.meses[m]||0), 0));
+  const total  = filas.reduce((s,r)=> s + r.total, 0);
+  const totEst = {pendiente:0, recibida:0, facturada:0};
+  filas.forEach(r=> RMC_ESTATUS.forEach(e=> totEst[e.k] += r.est[e.k]));
+  const nOCs   = filas.reduce((s,r)=> s + r.n, 0);
+  const maxCel = Math.max(1, ...filas.map(r=> Math.max(...meses.map(m=> r.meses[m]||0))));
+  return {meses, hasta, disp, filas, totMes, total, totEst, nOCs, maxCel};
+}
+
+function rmcSetMeses(n){ rmcNMeses = Number(n); renderResumenOCMensual(); }
+function rmcSetHasta(ym){ rmcHasta = ym; renderResumenOCMensual(); }
+function rmcSetIVA(v){ rmcIVA = !!v; renderResumenOCMensual(); }
+function rmcToggle(k){ rmcSel[k] = !rmcSel[k]; renderResumenOCMensual(); }
+
+function renderResumenOCMensual(){
+  const cont = document.getElementById('rmc-content');
+  if(!cont) return;
+  const d = rmcCalcular();
+
+  /* --- controles --- */
+  const chips = RMC_ESTATUS.map(e=>{
+    const on = rmcSel[e.k];
+    return `<button class="btn" onclick="rmcToggle('${e.k}')" title="Mostrar u ocultar ${e.label}"
+      style="font-size:11px;padding:5px 11px;border:1px solid ${on?e.color:'var(--line)'};
+             background:${on?e.color:'transparent'};color:${on?'#fff':'var(--muted)'};">
+      ${on?'✓ ':''}${e.label} · ${moneyShort(d.totEst[e.k])}</button>`;
+  }).join('');
+
+  const optMeses = [[0,'Solo meses con OCs'],[3,'Últimos 3 meses'],[6,'Últimos 6 meses'],[12,'Últimos 12 meses']]
+    .map(([n,t])=>`<option value="${n}" ${rmcNMeses===n?'selected':''}>${t}</option>`).join('');
+  const optHasta = d.disp.slice().reverse().map(ym=>`<option value="${ym}" ${ym===d.hasta?'selected':''}>hasta ${rmcMesLabel(ym)}</option>`).join('');
+  document.getElementById('rmc-controls').innerHTML =
+    `<select onchange="rmcSetMeses(this.value)" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">${optMeses}</select>
+     <select onchange="rmcSetHasta(this.value)" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">${optHasta}</select>
+     <select onchange="rmcSetIVA(this.value==='1')" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+       <option value="0" ${!rmcIVA?'selected':''}>Sin IVA</option><option value="1" ${rmcIVA?'selected':''}>Con IVA 16%</option>
+     </select>
+     <button class="btn btn-secondary" style="font-size:11px;padding:5px 11px;" onclick="rmcExport()">⬇ Excel</button>`;
+  document.getElementById('rmc-chips').innerHTML = chips;
+
+  if(!d.filas.length){
+    cont.innerHTML = `<div class="empty">Sin órdenes de compra en el periodo y estatus seleccionados</div>`;
+    return;
+  }
+
+  /* --- tabla --- */
+  const th = m => `<th style="text-align:right;white-space:nowrap;">${rmcMesLabel(m)}</th>`;
+  const celda = (v) => {
+    if(!v) return `<td style="text-align:right;color:var(--line);">—</td>`;
+    const a = (v / d.maxCel * 0.22).toFixed(3);
+    return `<td style="text-align:right;white-space:nowrap;background:rgba(43,93,155,${a});">${moneyShort(v)}</td>`;
+  };
+  const estCel = (v,color) => `<td style="text-align:right;white-space:nowrap;color:${v?color:'var(--line)'};">${v?moneyShort(v):'—'}</td>`;
+
+  cont.innerHTML = `
+    <div style="overflow-x:auto;">
+    <table style="min-width:${420 + d.meses.length*90}px;">
+      <thead>
+        <tr>
+          <th style="position:sticky;left:0;background:var(--card);z-index:1;">Cliente</th>
+          <th style="text-align:right;">OCs</th>
+          ${d.meses.map(th).join('')}
+          <th style="text-align:right;border-left:1px solid var(--line);">Total</th>
+          ${RMC_ESTATUS.map(e=>`<th style="text-align:right;white-space:nowrap;color:${e.color};">${e.label}</th>`).join('')}
+        </tr>
+      </thead>
+      <tbody>
+        ${d.filas.map(r=>`
+          <tr>
+            <td style="position:sticky;left:0;background:var(--card);z-index:1;font-weight:600;white-space:nowrap;">${r.nombre}</td>
+            <td style="text-align:right;color:var(--muted);">${r.n}</td>
+            ${d.meses.map(m=>celda(r.meses[m]||0)).join('')}
+            <td style="text-align:right;font-weight:700;white-space:nowrap;border-left:1px solid var(--line);">${moneyShort(r.total)}</td>
+            ${RMC_ESTATUS.map(e=>estCel(r.est[e.k], e.color)).join('')}
+          </tr>`).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="background:var(--paper-raised);font-weight:700;">
+          <td style="position:sticky;left:0;background:var(--paper-raised);z-index:1;">Total</td>
+          <td style="text-align:right;">${d.nOCs}</td>
+          ${d.meses.map(m=>`<td style="text-align:right;white-space:nowrap;">${d.totMes[m]?moneyShort(d.totMes[m]):'—'}</td>`).join('')}
+          <td style="text-align:right;white-space:nowrap;border-left:1px solid var(--line);">${moneyShort(d.total)}</td>
+          ${RMC_ESTATUS.map(e=>`<td style="text-align:right;white-space:nowrap;color:${e.color};">${d.totEst[e.k]?moneyShort(d.totEst[e.k]):'—'}</td>`).join('')}
+        </tr>
+      </tfoot>
+    </table>
+    </div>
+    <div class="small-note" style="margin-top:10px;color:var(--muted);font-size:11px;">
+      Valor = cantidad × precio unitario de cada línea, ${rmcIVA?'con IVA de 16%':'sin IVA'}.
+      “En producción” son las OCs aceptadas. Las rechazadas y las desactivadas no suman.
+      El sombreado marca los meses más fuertes de cada cliente.
+    </div>`;
+}
+
+function rmcExport(){
+  const d = rmcCalcular();
+  if(!d.filas.length){ showToast('No hay datos para exportar'); return; }
+  const head = ['Cliente','OCs', ...d.meses.map(rmcMesLabel), 'Total', ...RMC_ESTATUS.map(e=>e.label)];
+  const rows = [head];
+  d.filas.forEach(r=> rows.push([r.nombre, r.n, ...d.meses.map(m=>Math.round(r.meses[m]||0)), Math.round(r.total), ...RMC_ESTATUS.map(e=>Math.round(r.est[e.k]))]));
+  rows.push(['Total', d.nOCs, ...d.meses.map(m=>Math.round(d.totMes[m])), Math.round(d.total), ...RMC_ESTATUS.map(e=>Math.round(d.totEst[e.k]))]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, {wch:13},{wch:14},{wch:13}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Resumen por cliente');
+  XLSX.writeFile(wb, 'Resumen_OCs_por_cliente_' + d.meses[0] + '_a_' + d.meses[d.meses.length-1] + (rmcIVA?'_conIVA':'_sinIVA') + '.xlsx');
+  showToast('Resumen descargado');
 }
 
 let chartPeriod = 90;
