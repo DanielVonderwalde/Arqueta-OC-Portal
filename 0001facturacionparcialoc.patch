@@ -1,0 +1,2067 @@
+From 97b05382905b6f6a313fc914c77109209a2b91c7 Mon Sep 17 00:00:00 2001
+From: Daniel Vonderwalde <daniel.vonder@gmail.com>
+Date: Fri, 28 Aug 2026 15:34:10 +0000
+Subject: [PATCH] =?UTF-8?q?Facturaci=C3=B3n=20parcial=20de=20OCs=20y=20rea?=
+ =?UTF-8?q?pertura=20de=20OCs=20facturadas?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ Portal-OC-Interno-V2.html | 312 +++++++++++++++++++++++++++++++++++---
+ Portal-OC-Interno.html    | 312 +++++++++++++++++++++++++++++++++++---
+ Portal-OC-InternoV2.html  | 312 +++++++++++++++++++++++++++++++++++---
+ PortalOCInterno.html      | 312 +++++++++++++++++++++++++++++++++++---
+ 4 files changed, 1152 insertions(+), 96 deletions(-)
+
+diff --git a/Portal-OC-Interno-V2.html b/Portal-OC-Interno-V2.html
+index a750295..e957c50 100644
+--- a/Portal-OC-Interno-V2.html
++++ b/Portal-OC-Interno-V2.html
+@@ -618,7 +618,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+           <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+             <select id="oc-filter-client" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;"><option value="">Todos los clientes</option></select>
+             <select id="oc-filter-status" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+-              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
++              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="parcial">Facturada parcialmente</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
+             </select>
+             <select id="oc-filter-days" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+               <option value="0">Todas las fechas</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="120">Últimos 120 días</option><option value="180">Últimos 180 días</option>
+@@ -1010,6 +1010,26 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+   </div>
+ </div>
+ 
++<div class="modal-overlay" id="modal-oc-parcial">
++  <div class="modal wide">
++    <button class="modal-close" onclick="closeModal('modal-oc-parcial')">×</button>
++    <h2>Facturación parcial</h2>
++    <div id="fp-encabezado" class="small-note" style="margin-bottom:14px;"></div>
++    <div class="formrow">
++      <div class="field"><label>Folio de la factura</label><input type="text" id="fp-folio" placeholder="A-1234"></div>
++      <div class="field"><label>Fecha de la factura</label><input type="date" id="fp-fecha"></div>
++    </div>
++    <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Piezas que se facturan en esta parcialidad</div>
++    <div id="fp-lineas"></div>
++    <div id="fp-resumen" style="margin-top:10px;font-size:12.5px;color:var(--muted);"></div>
++    <div id="fp-historial" style="margin-top:16px;"></div>
++    <div class="modal-actions">
++      <button class="btn btn-secondary" onclick="closeModal('modal-oc-parcial')">Cancelar</button>
++      <button class="btn btn-primary" onclick="guardarFacturaParcial()">Guardar parcialidad</button>
++    </div>
++  </div>
++</div>
++
+ <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
+ 
+ <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+@@ -1306,7 +1326,7 @@ function normalizeDB(d){
+   d.purchaseOrders = toArr(d.purchaseOrders);
+   d.clientOCs = toArr(d.clientOCs);
+   d.notifEmails = toArr(d.notifEmails);
+-  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); });
++  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); if(o.facturas){ o.facturas = toArr(o.facturas); o.facturas.forEach(f=>{ if(f && f.lineas) f.lineas = toArr(f.lineas); }); } });
+   return d;
+ }
+ let DB = seedData();
+@@ -1897,12 +1917,13 @@ function renderInicio(){
+ const RMC_ESTATUS = [
+   {k:'pendiente', label:'Pendiente',     color:'var(--kraft)'},
+   {k:'recibida',  label:'En producción', color:'var(--teal)'},
++  {k:'parcial',   label:'Parcial',       color:'#C08A3E'},
+   {k:'facturada', label:'Facturada',     color:'var(--muted)'}
+ ];
+ const RMC_MESES_NOM = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+ let rmcNMeses = 0;   // 0 = solo los meses que tienen OCs (dentro de los ultimos 12)
+ let rmcHasta  = '';
+-let rmcSel    = {pendiente:true, recibida:true, facturada:true};
++let rmcSel    = {pendiente:true, recibida:true, parcial:true, facturada:true};
+ let rmcIVA    = false;
+ 
+ function rmcValorOC(o){
+@@ -1951,7 +1972,7 @@ function rmcCalcular(){
+     const cl = clientById(o.client_id);
+     const nombre = cl ? cl.name : 'Sin cliente';
+     const r = porCliente[nombre] || (porCliente[nombre] = {
+-      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, facturada:0}
++      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, parcial:0, facturada:0}
+     });
+     const v = rmcValorOC(o) * f;
+     r.n++; r.total += v;
+@@ -1962,7 +1983,7 @@ function rmcCalcular(){
+   const filas  = Object.values(porCliente).filter(r=>r.total > 0).sort((a,b)=>b.total - a.total);
+   const totMes = {}; meses.forEach(m=> totMes[m] = filas.reduce((s,r)=> s + (r.meses[m]||0), 0));
+   const total  = filas.reduce((s,r)=> s + r.total, 0);
+-  const totEst = {pendiente:0, recibida:0, facturada:0};
++  const totEst = {pendiente:0, recibida:0, parcial:0, facturada:0};
+   filas.forEach(r=> RMC_ESTATUS.forEach(e=> totEst[e.k] += r.est[e.k]));
+   const nOCs   = filas.reduce((s,r)=> s + r.n, 0);
+   const maxCel = Math.max(1, ...filas.map(r=> Math.max(...meses.map(m=> r.meses[m]||0))));
+@@ -2062,7 +2083,7 @@ function rmcExport(){
+   d.filas.forEach(r=> rows.push([r.nombre, r.n, ...d.meses.map(m=>Math.round(r.meses[m]||0)), Math.round(r.total), ...RMC_ESTATUS.map(e=>Math.round(r.est[e.k]))]));
+   rows.push(['Total', d.nOCs, ...d.meses.map(m=>Math.round(d.totMes[m])), Math.round(d.total), ...RMC_ESTATUS.map(e=>Math.round(d.totEst[e.k]))]);
+   const ws = XLSX.utils.aoa_to_sheet(rows);
+-  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, {wch:13},{wch:14},{wch:13}];
++  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, ...RMC_ESTATUS.map(()=>({wch:14}))];
+   const wb = XLSX.utils.book_new();
+   XLSX.utils.book_append_sheet(wb, ws, 'Resumen por cliente');
+   XLSX.writeFile(wb, 'Resumen_OCs_por_cliente_' + d.meses[0] + '_a_' + d.meses[d.meses.length-1] + (rmcIVA?'_conIVA':'_sinIVA') + '.xlsx');
+@@ -2116,11 +2137,11 @@ function renderOCCharts(){
+     </div>`).join('') : '<div class="empty" style="padding:20px;">Sin OCs en este período</div>';
+ 
+   // Status donut
+-  const byStatus = {pendiente:0, recibida:0, facturada:0, rechazada:0};
++  const byStatus = {pendiente:0, recibida:0, parcial:0, facturada:0, rechazada:0};
+   filtered.forEach(o=>{ byStatus[o.status||'pendiente']++; });
+   const total = filtered.length || 1;
+-  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',facturada:'#6B7A8D',rechazada:'#A63A3A'};
+-  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',facturada:'Facturadas',rechazada:'Rechazadas'};
++  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',parcial:'#C08A3E',facturada:'#6B7A8D',rechazada:'#A63A3A'};
++  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',parcial:'Parciales',facturada:'Facturadas',rechazada:'Rechazadas'};
+   document.getElementById('oc-status-chart').innerHTML = Object.entries(byStatus).map(([s,n])=>`
+     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+       <div style="width:10px;height:10px;border-radius:50%;background:${statusColors[s]};"></div>
+@@ -2170,7 +2191,7 @@ function renderOCCharts(){
+   const ocValues = filtered.map(o=>(o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0));
+   const avgTicket = ocValues.length ? ocValues.reduce((s,v)=>s+v,0)/ocValues.length : 0;
+   const avgProducts = filtered.length ? filtered.reduce((s,o)=>s+(o.lines||[]).length,0)/filtered.length : 0;
+-  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='facturada').length;
++  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='parcial'||o.status==='facturada').length;
+   const acceptRate = filtered.length ? (accepted/filtered.length*100) : 0;
+ 
+   document.getElementById('kpi-avg-ticket').textContent = moneyShort(avgTicket);
+@@ -2511,17 +2532,19 @@ function renderClientOCs(){
+   const esActiva = o => !['facturada','rechazada'].includes(o.status);
+   const conteos = {
+     activas:    todas.filter(esActiva).length,
++    parciales:  todas.filter(o=>o.status==='parcial').length,
+     facturadas: todas.filter(o=>o.status==='facturada').length,
+     rechazadas: todas.filter(o=>o.status==='rechazada').length,
+     todas:      todas.length
+   };
+-  const pills = [['activas','Activas'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
++  const pills = [['activas','Activas'],['parciales','Parciales'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
+   document.getElementById('cd-oc-filters').innerHTML = pills.map(([k,label])=>
+     `<button class="btn ${cdOCFiltro===k?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:5px 12px;" onclick="setClientOCFilter('${k}')">${label} (${conteos[k]})</button>`
+   ).join('');
+ 
+   const list = cdOCFiltro==='todas' ? todas
+              : cdOCFiltro==='activas' ? todas.filter(esActiva)
++             : cdOCFiltro==='parciales' ? todas.filter(o=>o.status==='parcial')
+              : todas.filter(o=>o.status===cdOCFiltro.replace(/s$/,''));
+ 
+   const totalDe = arr => arr.reduce((s,o)=>s+(o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0)*1.16, 0);
+@@ -2533,6 +2556,7 @@ function renderClientOCs(){
+   const badgeDe = st => st==='facturada'
+       ? '<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>'
+       : st==='rechazada' ? '<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>'
++      : st==='parcial'   ? '<span class="badge" style="font-size:10px;background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Parcial</span>'
+       : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Aceptada</span>'
+       : '<span class="badge badge-borrador" style="font-size:10px;">Pendiente</span>';
+ 
+@@ -2544,8 +2568,9 @@ function renderClientOCs(){
+         (lines.length>2 ? `<div style="color:var(--muted);font-size:11px;">+${lines.length-2} más</div>` : '')
+       : '—';
+     const urg = o.urgente ? ' <span class="badge badge-match-no" style="font-size:9px;">URGENTE</span>' : '';
+-    const facturar = o.status==='recibida'
+-      ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada" onclick="marcarFacturada('${o.id}')">$</button>` : '';
++    const puedeFactCD = o.status==='recibida' || o.status==='parcial';
++    const facturar = puedeFactCD
++      ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="Facturar parcialmente" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button><button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial'?'Cerrar el remanente':'Marcar facturada'}" onclick="marcarFacturada('${o.id}')">$</button>` : '';
+     const file = o.fileName
+       ? `<button class="btn btn-ghost" style="font-size:12px;color:var(--teal);" title="Ver ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}','view')">👁</button>
+          <button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="Descargar ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
+@@ -2557,7 +2582,7 @@ function renderClientOCs(){
+       <td style="font-size:12px;">${prods}</td>
+       <td>${o.date_submitted||'—'}</td>
+       <td style="text-align:right;font-weight:600;">${money(sub*1.16)}</td>
+-      <td class="mono" style="font-size:11px;">${o.factura_numero||'—'}</td>
++      <td class="mono" style="font-size:11px;">${o.status==='parcial' ? ocFacturas(o).length+' parcial(es) · '+ocAvanceFactura(o).pct.toFixed(0)+'%' : (o.factura_numero||'—')}</td>
+       <td>${badgeDe(o.status||'pendiente')}</td>
+       <td style="text-align:right;white-space:nowrap;">${facturar}${file}</td>
+     </tr>`;
+@@ -3612,11 +3637,16 @@ function renderPOList(){
+         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
+         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
+         const solPend = ocSolicitudPendiente(o);
+-        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        const avanceOC = ocAvanceFactura(o);
++        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='parcial' ? '<span class="badge" style="background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Facturada parcial</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        /* Barra de avance: cuanto de la OC ya se facturó, en valor. */
++        const barraParcial = o.status==='parcial'
++          ? `<div style="margin-top:5px;max-width:140px;"><div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;height:7px;overflow:hidden;"><div style="width:${avanceOC.pct.toFixed(1)}%;height:100%;background:#C08A3E;"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.45;">${avanceOC.pct.toFixed(0)}% facturado · faltan ${money(avanceOC.resto)}<br>${ocFacturas(o).length} parcialidad(es)</div></div>`
++          : '';
+         /* En revisión: el asociado ya pidió el cambio y falta que lo autorice el admin. */
+         const statusBadge = solPend
+-          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>'
+-          : badgeBase;
++          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>' + barraParcial
++          : badgeBase + barraParcial;
+         const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
+         const alertaBadge = chequeo.nivel==='bad'
+           ? '<div style="margin-top:4px;"><span class="badge badge-match-no" style="font-size:10px;">⛔ REVISAR PRECIO</span></div>'
+@@ -3638,7 +3668,15 @@ function renderPOList(){
+         } else if(o.status==='pendiente'){
+           ocBotones = `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" title="${esAdmin?'Aceptar la OC':'Pedir autorización para aceptar'}" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" title="${esAdmin?'Rechazar la OC':'Pedir autorización para rechazar'}" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>`;
+         } else {
+-          ocBotones = `${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar'}" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
++          /* Aceptada o parcial: se puede facturar por partes (½) o cerrar el total ($). */
++          const puedeFacturarOC = o.status==='recibida' || o.status==='parcial';
++          const btnParcialOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="${esAdmin?'Registrar una facturación parcial':'Pedir autorización de una facturación parcial'}" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button>`
++            : '';
++          const btnTotalOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial' ? (esAdmin?'Cerrar el remanente y archivar':'Pedir autorización para cerrar el remanente') : (esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar')}" onclick="marcarFacturada('${o.id}')">$</button>`
++            : '';
++          ocBotones = `${btnParcialOC}${btnTotalOC}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
+         }
+         const actions = `<div style="display:flex;gap:4px;">${editBtn}${ocBotones}${delBtn}</div>`;
+         html += `<tr style="${chequeo.nivel==='bad'?'box-shadow:inset 4px 0 0 #A63A3A;':chequeo.nivel==='warn'?'box-shadow:inset 4px 0 0 #C08A3E;':''}"><td class="mono">${o.oc_number}${urgentBadge}${alertaBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
+@@ -3675,7 +3713,9 @@ function renderOCArchivo(list){
+     const badge = esFact
+       ? `<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>`
+       : `<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>`;
+-    const fact = o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '';
++    const nParc = ocFacturas(o).length;
++    const fact = (o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '')
++               + (nParc ? `<span style="font-size:11px;color:var(--muted);"> · ${nParc} parcialidad(es)</span>` : '');
+     html += `<tr style="font-size:12px;background:#fff;">
+       <td class="mono" style="padding:6px 10px;">${o.oc_number}</td>
+       <td colspan="2" style="padding:6px 10px;color:var(--muted);">${cl?cl.name:'—'}${fact}</td>
+@@ -3684,23 +3724,202 @@ function renderOCArchivo(list){
+       <td style="padding:6px 10px;">${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;">👁 ver</a> <a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;">⬇</a>` : '—'}</td>
+       <td style="padding:6px 10px;">${badge}</td>
+       <td style="padding:6px 10px;"><div style="display:flex;gap:4px;">
+-        <button class="btn btn-ghost" style="font-size:11px;" title="Regresar a activas" onclick="setClientOCStatus('${o.id}','recibida')">↩</button>
++        ${esFact && currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" title="Editar esta OC facturada" onclick="openPOModal('${o.id}')">✏</button>` : ''}
++        <button class="btn btn-ghost" style="font-size:11px;" title="${esFact?'Regresar a Aceptada conservando el número de factura':'Regresar a activas'}" onclick="${esFact ? `reabrirOCFacturada('${o.id}')` : `setClientOCStatus('${o.id}','recibida')`}">↩</button>
+         ${currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : ''}
+       </div></td></tr>`;
+   });
+   return html;
+ }
+ 
+-/* Marca una OC como facturada y la manda al archivo */
++/* ══════════ FACTURACIÓN PARCIAL DE OCs ══════════
++   Una OC aceptada casi nunca se factura de un jalón: salen 20 mil de las
++   50 mil piezas y ésas ya se cobran. Cada parcialidad se guarda en
++   oc.facturas = [{id, folio, fecha, lineas:[{i, codigo, product, cantidad}]}],
++   donde 'i' es la posición de la línea dentro de oc.lines.
++   Mientras falten piezas la OC se queda en activas con estatus 'parcial'
++   y barra de avance; cuando ya no falta nada pasa sola a 'facturada' y se
++   archiva. Nada se borra: las parcialidades se conservan aunque la OC se
++   reabra desde el archivo.                                              */
++/* esc() del bloque CRM vive dentro de un IIFE; aquí se ocupa uno propio. */
++function fpEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
++function ocLineas(o){ return Array.isArray(o && o.lines) ? o.lines : Object.values((o && o.lines) || {}); }
++function ocFacturas(o){ return Array.isArray(o && o.facturas) ? o.facturas : Object.values((o && o.facturas) || {}); }
++function ocFacturaLineas(f){ return Array.isArray(f && f.lineas) ? f.lineas : Object.values((f && f.lineas) || {}); }
++
++/* Piezas ya facturadas de una línea, sumando todas las parcialidades. */
++function ocFacturadoLinea(o, idx){
++  return ocFacturas(o).reduce((s,f)=> s + ocFacturaLineas(f).reduce((a,l)=>
++    a + (Number(l && l.i) === Number(idx) ? (Number(l.cantidad)||0) : 0), 0), 0);
++}
++function ocPendienteLinea(o, idx){
++  const l = ocLineas(o)[idx] || {};
++  return Math.max(0, (Number(l.quantity)||0) - ocFacturadoLinea(o, idx));
++}
++/* Avance en dinero: lo facturado contra el valor total de la OC, sin IVA. */
++function ocAvanceFactura(o){
++  let total = 0, fact = 0;
++  ocLineas(o).forEach((l,i)=>{
++    const q = Number(l.quantity)||0, pu = Number(l.unit_price)||0;
++    total += q*pu;
++    fact  += Math.min(q, ocFacturadoLinea(o,i))*pu;
++  });
++  const pct = total > 0 ? Math.min(100, fact/total*100) : 0;
++  return {total:total, facturado:fact, resto:Math.max(0, total-fact), pct:pct};
++}
++function ocFacturaCompleta(o){
++  const ls = ocLineas(o);
++  if(!ls.length) return false;
++  return ls.every((l,i)=> ocFacturadoLinea(o,i) >= (Number(l.quantity)||0) - 0.000001);
++}
++
++/* ---- Modal de captura de una parcialidad ---- */
++let fpOCId = null;
++
++function abrirFacturaParcial(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  if(oc.status !== 'recibida' && oc.status !== 'parcial'){ showToast('Solo se factura por partes una OC ya aceptada'); return; }
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  fpOCId = id;
++  const cl = clientById(oc.client_id);
++  const av = ocAvanceFactura(oc);
++  document.getElementById('fp-encabezado').innerHTML =
++    'OC <strong class="mono">'+fpEsc(oc.oc_number)+'</strong> · '+fpEsc(cl?cl.name:'—')+
++    ' · facturado '+money(av.facturado)+' de '+money(av.total)+' ('+av.pct.toFixed(0)+'%)';
++  document.getElementById('fp-folio').value = '';
++  document.getElementById('fp-fecha').value = hoyMX();
++
++  const ls = ocLineas(oc);
++  document.getElementById('fp-lineas').innerHTML = ls.length ? ls.map((l,i)=>{
++    const q = Number(l.quantity)||0;
++    const ya = ocFacturadoLinea(oc, i);
++    const pend = Math.max(0, q - ya);
++    return '<div style="display:grid;grid-template-columns:0.8fr 2fr 1fr 1fr 1.2fr;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;">'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Código</div><span class="mono">'+fpEsc(l.codigo||'—')+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Producto</div>'+fpEsc(l.product||'—')+'</div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Pedidas</div><span class="mono">'+qty(q)+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Ya facturadas</div><span class="mono">'+qty(ya)+'</span></div>'+
++      '<div class="field" style="margin:0;"><label>Facturar ahora (máx '+qty(pend)+')</label>'+
++        '<input type="number" class="fp-qty" data-idx="'+i+'" min="0" max="'+pend+'" step="1" value="0" '+(pend<=0?'disabled':'')+' oninput="fpResumen()"></div>'+
++    '</div>';
++  }).join('') : '<div class="empty">Esta OC no tiene líneas de producto</div>';
++
++  document.getElementById('fp-historial').innerHTML = fpHistorialHTML(oc);
++  fpResumen();
++  document.getElementById('modal-oc-parcial').classList.add('active');
++}
++
++/* Lo que se está capturando ahora, en piezas y en dinero. */
++function fpResumen(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc) return;
++  const ls = ocLineas(oc);
++  let val = 0, piezas = 0;
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    const l = ls[i] || {};
++    val += n * (Number(l.unit_price)||0);
++    piezas += n;
++  });
++  const av = ocAvanceFactura(oc);
++  const resto = Math.max(0, av.resto - val);
++  document.getElementById('fp-resumen').innerHTML =
++    'Esta parcialidad: <strong>'+qty(piezas)+'</strong> pieza(s) · <strong>'+money(val)+'</strong> sin IVA ('+money(val*1.16)+' con IVA) · quedaría pendiente '+money(resto) +
++    ((val > 0 && resto <= 0.000001) ? ' — <span style="color:var(--teal);font-weight:600;">con esto la OC queda facturada por completo y se archiva</span>' : '');
++}
++
++function fpHistorialHTML(oc){
++  const fs = ocFacturas(oc);
++  if(!fs.length) return '';
++  const ls = ocLineas(oc);
++  return '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Parcialidades ya registradas</div>' +
++    fs.map(f=>{
++      const det = ocFacturaLineas(f).filter(l=>(Number(l.cantidad)||0)>0).map(l=>{
++        const base = ls[Number(l.i)] || {};
++        return fpEsc(l.product || base.product || base.codigo || '—')+': '+qty(Number(l.cantidad)||0);
++      }).join(' · ');
++      const val = ocFacturaLineas(f).reduce((a,l)=>{
++        const base = ls[Number(l.i)] || {};
++        return a + (Number(l.cantidad)||0) * (Number(base.unit_price)||0);
++      }, 0);
++      return '<div style="font-size:12px;padding:6px 0;border-top:1px solid var(--line);">'+
++        '<span class="mono" style="font-weight:600;">'+fpEsc(f.folio || 'sin folio')+'</span>'+
++        '<span style="color:var(--muted);"> · '+fpEsc(f.fecha||'—')+' · '+money(val)+
++        (f.registradoPor?' · '+fpEsc(f.registradoPor):'')+'</span>'+
++        '<div style="color:var(--muted);font-size:11px;margin-top:2px;">'+(det||'—')+'</div></div>';
++    }).join('');
++}
++
++function guardarFacturaParcial(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  const folio = document.getElementById('fp-folio').value.trim();
++  const fecha = document.getElementById('fp-fecha').value || hoyMX();
++  const ls = ocLineas(oc);
++  const captura = [];
++  let excede = '';
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    if(n <= 0) return;
++    const l = ls[i] || {};
++    if(n > ocPendienteLinea(oc, i) + 0.000001){ excede = l.product || l.codigo || ('línea '+(i+1)); return; }
++    captura.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:n});
++  });
++  if(excede){ showToast('No puedes facturar más de lo que falta en «'+excede+'»'); return; }
++  if(!captura.length){ showToast('Captura al menos una pieza para facturar'); return; }
++  if(!folio && !confirm('Vas a guardar esta parcialidad sin folio de factura.\n\n¿Continuar?')) return;
++  closeModal('modal-oc-parcial');
++  setClientOCStatus(oc.id, 'parcial', {parcial:{folio:folio, fecha:fecha, lineas:captura}});
++}
++
++/* Marca una OC como facturada y la manda al archivo.
++   Si ya tiene parcialidades, el botón $ cierra únicamente el remanente. */
+ /* Facturar también lo autoriza el administrador. */
+ function marcarFacturada(id){
+   const oc = (DB.clientOCs||[]).find(o=>o.id===id);
+   if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++
++  if(ocFacturas(oc).length){
++    const resto = [];
++    ocLineas(oc).forEach((l,i)=>{
++      const pend = ocPendienteLinea(oc, i);
++      if(pend > 0) resto.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:pend});
++    });
++    if(!resto.length){
++      setClientOCStatus(id, 'facturada', {factura_numero:oc.factura_numero||'', factura_fecha:oc.factura_fecha||hoyMX()});
++      return;
++    }
++    const av = ocAvanceFactura(oc);
++    const folio = prompt('Cerrar el remanente de la OC '+oc.oc_number+'.\n\nFaltan '+money(av.resto)+' sin IVA ('+(100-av.pct).toFixed(0)+'% de la orden).\n\nFolio de la factura del remanente (opcional):', '');
++    if(folio===null) return;
++    setClientOCStatus(id, 'parcial', {parcial:{folio:folio.trim(), fecha:hoyMX(), lineas:resto}});
++    return;
++  }
++
+   if(!esAdminActual()){ setClientOCStatus(id, 'facturada'); return; }
+   const num = prompt('Número de factura para la OC ' + oc.oc_number + ' (opcional):', oc.factura_numero||'');
+   if(num===null) return;
+   setClientOCStatus(id, 'facturada', {factura_numero:num.trim(), factura_fecha:hoyMX()});
+ }
++
++/* Reabrir una OC del archivo: regresa a Aceptada conservando el número de
++   factura y las parcialidades, y queda asentado en el historial de
++   autorizaciones (como cualquier otro cambio de estatus). */
++function reabrirOCFacturada(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  const nParc = ocFacturas(oc).length;
++  const conFactura = oc.factura_numero
++    ? '\n\nSe conserva la factura '+oc.factura_numero+(oc.factura_fecha?' ('+oc.factura_fecha+')':'')+'.' : '';
++  const conParciales = nParc ? '\nLas '+nParc+' parcialidad(es) registradas no se borran.' : '';
++  if(!confirm('¿Regresar la OC '+oc.oc_number+' a Aceptada?\n\nSale del archivo y vuelve a las órdenes activas.'+conFactura+conParciales)) return;
++  setClientOCStatus(id, 'recibida', {motivo:'Reapertura de OC facturada'+(oc.factura_numero?' — factura '+oc.factura_numero:'')});
++}
+ /* ══════════ AUTORIZACIÓN DEL ADMINISTRADOR ══════════
+    Ningún cambio de estatus de una OC de cliente surte efecto si no lo
+    autoriza un administrador: aceptar, rechazar, facturar y regresar a
+@@ -3709,7 +3928,7 @@ function marcarFacturada(id){
+    cliente sigue viendo 'Pendiente' hasta que el admin la acepte.
+    Nada se pierde: cada solicitud y cada decisión se agregan a
+    oc.autorizaciones, que solo crece.                                  */
+-const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', facturada:'Facturar', rechazada:'Rechazar'};
++const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', parcial:'Facturar parcialmente', facturada:'Facturar', rechazada:'Rechazar'};
+ 
+ function esAdminActual(){ return currentRole === 'admin'; }
+ 
+@@ -3725,6 +3944,37 @@ function ocRegistrarAutorizacion(oc, entrada){
+ 
+ function ocAplicarEstatus(oc, accion, extra){
+   const e = extra || {};
++  /* Facturación parcial: no es un estatus que se ponga a mano, es el
++     resultado de sumar parcialidades. Se guarda la parcialidad y la OC
++     se acomoda sola: 'parcial' mientras falte algo, 'facturada' cuando
++     ya no falta nada. */
++  if(accion === 'parcial'){
++    const p = e.parcial || {};
++    const lineas = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas || {}))
++                     .filter(l => l && (Number(l.cantidad)||0) > 0)
++                     .map(l => ({i:Number(l.i)||0, codigo:l.codigo||'', product:l.product||'', cantidad:Number(l.cantidad)||0}));
++    oc.facturas = ocFacturas(oc).slice();
++    oc.facturas.push({
++      id: uid('fac'),
++      folio: (p.folio||'').trim(),
++      fecha: p.fecha || hoyMX(),
++      lineas: lineas,
++      registradoPor: usuarioActual(),
++      registradoEn: new Date().toISOString()
++    });
++    if(ocFacturaCompleta(oc)){
++      oc.status = 'facturada';
++      const ult = oc.facturas[oc.facturas.length-1];
++      oc.factura_numero = oc.factura_numero || ult.folio || '';
++      oc.factura_fecha  = ult.fecha || hoyMX();
++    } else {
++      oc.status = 'parcial';
++    }
++    oc.statusUpdatedAt = new Date().toISOString();
++    oc.statusUpdatedBy = usuarioActual();
++    oc.autorizacion_pendiente = null;
++    return;
++  }
+   oc.status = accion;
+   if(accion === 'facturada'){
+     oc.factura_numero = e.factura_numero !== undefined ? e.factura_numero : (oc.factura_numero||'');
+@@ -3757,6 +4007,7 @@ function setClientOCStatus(id, newStatus, extra){
+       desde: oc.status || 'pendiente',
+       motivo: nota.trim(),
+       factura_numero: (extra && extra.factura_numero) || '',
++      parcial: (extra && extra.parcial) || null,
+       solicitadoPor: usuarioActual(),
+       solicitadoEn: ahora
+     };
+@@ -3767,8 +4018,15 @@ function setClientOCStatus(id, newStatus, extra){
+   }
+ 
+   ocAplicarEstatus(oc, newStatus, extra);
+-  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora});
++  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora, motivo:(extra && extra.motivo) || ''});
+   ocRefrescar();
++  if(newStatus === 'parcial'){
++    const av = ocAvanceFactura(oc);
++    showToast(oc.status === 'facturada'
++      ? 'OC '+oc.oc_number+' facturada por completo — se archivó'
++      : 'Parcialidad registrada — OC '+oc.oc_number+' va al '+av.pct.toFixed(0)+'%, faltan '+money(av.resto));
++    return;
++  }
+   showToast('OC '+oc.oc_number+': '+etiqueta.toLowerCase()+' — autorizado');
+ }
+ 
+@@ -3786,6 +4044,12 @@ function autorizarOC(id){
+     if(num===null) return;
+     extra.factura_numero = num.trim();
+     extra.factura_fecha = hoyMX();
++  } else if(sol.accion === 'parcial'){
++    const p = sol.parcial || {};
++    const det = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas||{}))
++                  .map(l=>'· '+(l.product||l.codigo||'—')+': '+qty(Number(l.cantidad)||0)).join('\n');
++    if(!confirm('¿Autorizar la facturación parcial de la OC '+oc.oc_number+'?\n\nFolio: '+(p.folio||'sin folio')+'   Fecha: '+(p.fecha||hoyMX())+'\n\n'+det+'\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
++    extra.parcial = p;
+   } else {
+     if(!confirm('¿Autorizar «'+etiqueta+'» para la OC '+oc.oc_number+'?\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
+   }
+@@ -5961,7 +6225,7 @@ function fechaOC(o){
+ }
+ function pasaEstado(st){
+   if(S.estados==='todas') return true;
+-  if(S.estados==='cerradas') return st==='recibida'||st==='facturada';
++  if(S.estados==='cerradas') return st==='recibida'||st==='parcial'||st==='facturada';
+   return st!=='rechazada'&&st!=='cancelada'&&st!=='borrador';
+ }
+ 
+diff --git a/Portal-OC-Interno.html b/Portal-OC-Interno.html
+index a750295..e957c50 100644
+--- a/Portal-OC-Interno.html
++++ b/Portal-OC-Interno.html
+@@ -618,7 +618,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+           <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+             <select id="oc-filter-client" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;"><option value="">Todos los clientes</option></select>
+             <select id="oc-filter-status" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+-              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
++              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="parcial">Facturada parcialmente</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
+             </select>
+             <select id="oc-filter-days" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+               <option value="0">Todas las fechas</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="120">Últimos 120 días</option><option value="180">Últimos 180 días</option>
+@@ -1010,6 +1010,26 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+   </div>
+ </div>
+ 
++<div class="modal-overlay" id="modal-oc-parcial">
++  <div class="modal wide">
++    <button class="modal-close" onclick="closeModal('modal-oc-parcial')">×</button>
++    <h2>Facturación parcial</h2>
++    <div id="fp-encabezado" class="small-note" style="margin-bottom:14px;"></div>
++    <div class="formrow">
++      <div class="field"><label>Folio de la factura</label><input type="text" id="fp-folio" placeholder="A-1234"></div>
++      <div class="field"><label>Fecha de la factura</label><input type="date" id="fp-fecha"></div>
++    </div>
++    <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Piezas que se facturan en esta parcialidad</div>
++    <div id="fp-lineas"></div>
++    <div id="fp-resumen" style="margin-top:10px;font-size:12.5px;color:var(--muted);"></div>
++    <div id="fp-historial" style="margin-top:16px;"></div>
++    <div class="modal-actions">
++      <button class="btn btn-secondary" onclick="closeModal('modal-oc-parcial')">Cancelar</button>
++      <button class="btn btn-primary" onclick="guardarFacturaParcial()">Guardar parcialidad</button>
++    </div>
++  </div>
++</div>
++
+ <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
+ 
+ <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+@@ -1306,7 +1326,7 @@ function normalizeDB(d){
+   d.purchaseOrders = toArr(d.purchaseOrders);
+   d.clientOCs = toArr(d.clientOCs);
+   d.notifEmails = toArr(d.notifEmails);
+-  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); });
++  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); if(o.facturas){ o.facturas = toArr(o.facturas); o.facturas.forEach(f=>{ if(f && f.lineas) f.lineas = toArr(f.lineas); }); } });
+   return d;
+ }
+ let DB = seedData();
+@@ -1897,12 +1917,13 @@ function renderInicio(){
+ const RMC_ESTATUS = [
+   {k:'pendiente', label:'Pendiente',     color:'var(--kraft)'},
+   {k:'recibida',  label:'En producción', color:'var(--teal)'},
++  {k:'parcial',   label:'Parcial',       color:'#C08A3E'},
+   {k:'facturada', label:'Facturada',     color:'var(--muted)'}
+ ];
+ const RMC_MESES_NOM = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+ let rmcNMeses = 0;   // 0 = solo los meses que tienen OCs (dentro de los ultimos 12)
+ let rmcHasta  = '';
+-let rmcSel    = {pendiente:true, recibida:true, facturada:true};
++let rmcSel    = {pendiente:true, recibida:true, parcial:true, facturada:true};
+ let rmcIVA    = false;
+ 
+ function rmcValorOC(o){
+@@ -1951,7 +1972,7 @@ function rmcCalcular(){
+     const cl = clientById(o.client_id);
+     const nombre = cl ? cl.name : 'Sin cliente';
+     const r = porCliente[nombre] || (porCliente[nombre] = {
+-      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, facturada:0}
++      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, parcial:0, facturada:0}
+     });
+     const v = rmcValorOC(o) * f;
+     r.n++; r.total += v;
+@@ -1962,7 +1983,7 @@ function rmcCalcular(){
+   const filas  = Object.values(porCliente).filter(r=>r.total > 0).sort((a,b)=>b.total - a.total);
+   const totMes = {}; meses.forEach(m=> totMes[m] = filas.reduce((s,r)=> s + (r.meses[m]||0), 0));
+   const total  = filas.reduce((s,r)=> s + r.total, 0);
+-  const totEst = {pendiente:0, recibida:0, facturada:0};
++  const totEst = {pendiente:0, recibida:0, parcial:0, facturada:0};
+   filas.forEach(r=> RMC_ESTATUS.forEach(e=> totEst[e.k] += r.est[e.k]));
+   const nOCs   = filas.reduce((s,r)=> s + r.n, 0);
+   const maxCel = Math.max(1, ...filas.map(r=> Math.max(...meses.map(m=> r.meses[m]||0))));
+@@ -2062,7 +2083,7 @@ function rmcExport(){
+   d.filas.forEach(r=> rows.push([r.nombre, r.n, ...d.meses.map(m=>Math.round(r.meses[m]||0)), Math.round(r.total), ...RMC_ESTATUS.map(e=>Math.round(r.est[e.k]))]));
+   rows.push(['Total', d.nOCs, ...d.meses.map(m=>Math.round(d.totMes[m])), Math.round(d.total), ...RMC_ESTATUS.map(e=>Math.round(d.totEst[e.k]))]);
+   const ws = XLSX.utils.aoa_to_sheet(rows);
+-  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, {wch:13},{wch:14},{wch:13}];
++  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, ...RMC_ESTATUS.map(()=>({wch:14}))];
+   const wb = XLSX.utils.book_new();
+   XLSX.utils.book_append_sheet(wb, ws, 'Resumen por cliente');
+   XLSX.writeFile(wb, 'Resumen_OCs_por_cliente_' + d.meses[0] + '_a_' + d.meses[d.meses.length-1] + (rmcIVA?'_conIVA':'_sinIVA') + '.xlsx');
+@@ -2116,11 +2137,11 @@ function renderOCCharts(){
+     </div>`).join('') : '<div class="empty" style="padding:20px;">Sin OCs en este período</div>';
+ 
+   // Status donut
+-  const byStatus = {pendiente:0, recibida:0, facturada:0, rechazada:0};
++  const byStatus = {pendiente:0, recibida:0, parcial:0, facturada:0, rechazada:0};
+   filtered.forEach(o=>{ byStatus[o.status||'pendiente']++; });
+   const total = filtered.length || 1;
+-  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',facturada:'#6B7A8D',rechazada:'#A63A3A'};
+-  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',facturada:'Facturadas',rechazada:'Rechazadas'};
++  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',parcial:'#C08A3E',facturada:'#6B7A8D',rechazada:'#A63A3A'};
++  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',parcial:'Parciales',facturada:'Facturadas',rechazada:'Rechazadas'};
+   document.getElementById('oc-status-chart').innerHTML = Object.entries(byStatus).map(([s,n])=>`
+     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+       <div style="width:10px;height:10px;border-radius:50%;background:${statusColors[s]};"></div>
+@@ -2170,7 +2191,7 @@ function renderOCCharts(){
+   const ocValues = filtered.map(o=>(o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0));
+   const avgTicket = ocValues.length ? ocValues.reduce((s,v)=>s+v,0)/ocValues.length : 0;
+   const avgProducts = filtered.length ? filtered.reduce((s,o)=>s+(o.lines||[]).length,0)/filtered.length : 0;
+-  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='facturada').length;
++  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='parcial'||o.status==='facturada').length;
+   const acceptRate = filtered.length ? (accepted/filtered.length*100) : 0;
+ 
+   document.getElementById('kpi-avg-ticket').textContent = moneyShort(avgTicket);
+@@ -2511,17 +2532,19 @@ function renderClientOCs(){
+   const esActiva = o => !['facturada','rechazada'].includes(o.status);
+   const conteos = {
+     activas:    todas.filter(esActiva).length,
++    parciales:  todas.filter(o=>o.status==='parcial').length,
+     facturadas: todas.filter(o=>o.status==='facturada').length,
+     rechazadas: todas.filter(o=>o.status==='rechazada').length,
+     todas:      todas.length
+   };
+-  const pills = [['activas','Activas'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
++  const pills = [['activas','Activas'],['parciales','Parciales'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
+   document.getElementById('cd-oc-filters').innerHTML = pills.map(([k,label])=>
+     `<button class="btn ${cdOCFiltro===k?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:5px 12px;" onclick="setClientOCFilter('${k}')">${label} (${conteos[k]})</button>`
+   ).join('');
+ 
+   const list = cdOCFiltro==='todas' ? todas
+              : cdOCFiltro==='activas' ? todas.filter(esActiva)
++             : cdOCFiltro==='parciales' ? todas.filter(o=>o.status==='parcial')
+              : todas.filter(o=>o.status===cdOCFiltro.replace(/s$/,''));
+ 
+   const totalDe = arr => arr.reduce((s,o)=>s+(o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0)*1.16, 0);
+@@ -2533,6 +2556,7 @@ function renderClientOCs(){
+   const badgeDe = st => st==='facturada'
+       ? '<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>'
+       : st==='rechazada' ? '<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>'
++      : st==='parcial'   ? '<span class="badge" style="font-size:10px;background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Parcial</span>'
+       : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Aceptada</span>'
+       : '<span class="badge badge-borrador" style="font-size:10px;">Pendiente</span>';
+ 
+@@ -2544,8 +2568,9 @@ function renderClientOCs(){
+         (lines.length>2 ? `<div style="color:var(--muted);font-size:11px;">+${lines.length-2} más</div>` : '')
+       : '—';
+     const urg = o.urgente ? ' <span class="badge badge-match-no" style="font-size:9px;">URGENTE</span>' : '';
+-    const facturar = o.status==='recibida'
+-      ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada" onclick="marcarFacturada('${o.id}')">$</button>` : '';
++    const puedeFactCD = o.status==='recibida' || o.status==='parcial';
++    const facturar = puedeFactCD
++      ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="Facturar parcialmente" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button><button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial'?'Cerrar el remanente':'Marcar facturada'}" onclick="marcarFacturada('${o.id}')">$</button>` : '';
+     const file = o.fileName
+       ? `<button class="btn btn-ghost" style="font-size:12px;color:var(--teal);" title="Ver ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}','view')">👁</button>
+          <button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="Descargar ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
+@@ -2557,7 +2582,7 @@ function renderClientOCs(){
+       <td style="font-size:12px;">${prods}</td>
+       <td>${o.date_submitted||'—'}</td>
+       <td style="text-align:right;font-weight:600;">${money(sub*1.16)}</td>
+-      <td class="mono" style="font-size:11px;">${o.factura_numero||'—'}</td>
++      <td class="mono" style="font-size:11px;">${o.status==='parcial' ? ocFacturas(o).length+' parcial(es) · '+ocAvanceFactura(o).pct.toFixed(0)+'%' : (o.factura_numero||'—')}</td>
+       <td>${badgeDe(o.status||'pendiente')}</td>
+       <td style="text-align:right;white-space:nowrap;">${facturar}${file}</td>
+     </tr>`;
+@@ -3612,11 +3637,16 @@ function renderPOList(){
+         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
+         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
+         const solPend = ocSolicitudPendiente(o);
+-        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        const avanceOC = ocAvanceFactura(o);
++        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='parcial' ? '<span class="badge" style="background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Facturada parcial</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        /* Barra de avance: cuanto de la OC ya se facturó, en valor. */
++        const barraParcial = o.status==='parcial'
++          ? `<div style="margin-top:5px;max-width:140px;"><div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;height:7px;overflow:hidden;"><div style="width:${avanceOC.pct.toFixed(1)}%;height:100%;background:#C08A3E;"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.45;">${avanceOC.pct.toFixed(0)}% facturado · faltan ${money(avanceOC.resto)}<br>${ocFacturas(o).length} parcialidad(es)</div></div>`
++          : '';
+         /* En revisión: el asociado ya pidió el cambio y falta que lo autorice el admin. */
+         const statusBadge = solPend
+-          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>'
+-          : badgeBase;
++          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>' + barraParcial
++          : badgeBase + barraParcial;
+         const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
+         const alertaBadge = chequeo.nivel==='bad'
+           ? '<div style="margin-top:4px;"><span class="badge badge-match-no" style="font-size:10px;">⛔ REVISAR PRECIO</span></div>'
+@@ -3638,7 +3668,15 @@ function renderPOList(){
+         } else if(o.status==='pendiente'){
+           ocBotones = `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" title="${esAdmin?'Aceptar la OC':'Pedir autorización para aceptar'}" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" title="${esAdmin?'Rechazar la OC':'Pedir autorización para rechazar'}" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>`;
+         } else {
+-          ocBotones = `${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar'}" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
++          /* Aceptada o parcial: se puede facturar por partes (½) o cerrar el total ($). */
++          const puedeFacturarOC = o.status==='recibida' || o.status==='parcial';
++          const btnParcialOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="${esAdmin?'Registrar una facturación parcial':'Pedir autorización de una facturación parcial'}" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button>`
++            : '';
++          const btnTotalOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial' ? (esAdmin?'Cerrar el remanente y archivar':'Pedir autorización para cerrar el remanente') : (esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar')}" onclick="marcarFacturada('${o.id}')">$</button>`
++            : '';
++          ocBotones = `${btnParcialOC}${btnTotalOC}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
+         }
+         const actions = `<div style="display:flex;gap:4px;">${editBtn}${ocBotones}${delBtn}</div>`;
+         html += `<tr style="${chequeo.nivel==='bad'?'box-shadow:inset 4px 0 0 #A63A3A;':chequeo.nivel==='warn'?'box-shadow:inset 4px 0 0 #C08A3E;':''}"><td class="mono">${o.oc_number}${urgentBadge}${alertaBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
+@@ -3675,7 +3713,9 @@ function renderOCArchivo(list){
+     const badge = esFact
+       ? `<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>`
+       : `<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>`;
+-    const fact = o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '';
++    const nParc = ocFacturas(o).length;
++    const fact = (o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '')
++               + (nParc ? `<span style="font-size:11px;color:var(--muted);"> · ${nParc} parcialidad(es)</span>` : '');
+     html += `<tr style="font-size:12px;background:#fff;">
+       <td class="mono" style="padding:6px 10px;">${o.oc_number}</td>
+       <td colspan="2" style="padding:6px 10px;color:var(--muted);">${cl?cl.name:'—'}${fact}</td>
+@@ -3684,23 +3724,202 @@ function renderOCArchivo(list){
+       <td style="padding:6px 10px;">${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;">👁 ver</a> <a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;">⬇</a>` : '—'}</td>
+       <td style="padding:6px 10px;">${badge}</td>
+       <td style="padding:6px 10px;"><div style="display:flex;gap:4px;">
+-        <button class="btn btn-ghost" style="font-size:11px;" title="Regresar a activas" onclick="setClientOCStatus('${o.id}','recibida')">↩</button>
++        ${esFact && currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" title="Editar esta OC facturada" onclick="openPOModal('${o.id}')">✏</button>` : ''}
++        <button class="btn btn-ghost" style="font-size:11px;" title="${esFact?'Regresar a Aceptada conservando el número de factura':'Regresar a activas'}" onclick="${esFact ? `reabrirOCFacturada('${o.id}')` : `setClientOCStatus('${o.id}','recibida')`}">↩</button>
+         ${currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : ''}
+       </div></td></tr>`;
+   });
+   return html;
+ }
+ 
+-/* Marca una OC como facturada y la manda al archivo */
++/* ══════════ FACTURACIÓN PARCIAL DE OCs ══════════
++   Una OC aceptada casi nunca se factura de un jalón: salen 20 mil de las
++   50 mil piezas y ésas ya se cobran. Cada parcialidad se guarda en
++   oc.facturas = [{id, folio, fecha, lineas:[{i, codigo, product, cantidad}]}],
++   donde 'i' es la posición de la línea dentro de oc.lines.
++   Mientras falten piezas la OC se queda en activas con estatus 'parcial'
++   y barra de avance; cuando ya no falta nada pasa sola a 'facturada' y se
++   archiva. Nada se borra: las parcialidades se conservan aunque la OC se
++   reabra desde el archivo.                                              */
++/* esc() del bloque CRM vive dentro de un IIFE; aquí se ocupa uno propio. */
++function fpEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
++function ocLineas(o){ return Array.isArray(o && o.lines) ? o.lines : Object.values((o && o.lines) || {}); }
++function ocFacturas(o){ return Array.isArray(o && o.facturas) ? o.facturas : Object.values((o && o.facturas) || {}); }
++function ocFacturaLineas(f){ return Array.isArray(f && f.lineas) ? f.lineas : Object.values((f && f.lineas) || {}); }
++
++/* Piezas ya facturadas de una línea, sumando todas las parcialidades. */
++function ocFacturadoLinea(o, idx){
++  return ocFacturas(o).reduce((s,f)=> s + ocFacturaLineas(f).reduce((a,l)=>
++    a + (Number(l && l.i) === Number(idx) ? (Number(l.cantidad)||0) : 0), 0), 0);
++}
++function ocPendienteLinea(o, idx){
++  const l = ocLineas(o)[idx] || {};
++  return Math.max(0, (Number(l.quantity)||0) - ocFacturadoLinea(o, idx));
++}
++/* Avance en dinero: lo facturado contra el valor total de la OC, sin IVA. */
++function ocAvanceFactura(o){
++  let total = 0, fact = 0;
++  ocLineas(o).forEach((l,i)=>{
++    const q = Number(l.quantity)||0, pu = Number(l.unit_price)||0;
++    total += q*pu;
++    fact  += Math.min(q, ocFacturadoLinea(o,i))*pu;
++  });
++  const pct = total > 0 ? Math.min(100, fact/total*100) : 0;
++  return {total:total, facturado:fact, resto:Math.max(0, total-fact), pct:pct};
++}
++function ocFacturaCompleta(o){
++  const ls = ocLineas(o);
++  if(!ls.length) return false;
++  return ls.every((l,i)=> ocFacturadoLinea(o,i) >= (Number(l.quantity)||0) - 0.000001);
++}
++
++/* ---- Modal de captura de una parcialidad ---- */
++let fpOCId = null;
++
++function abrirFacturaParcial(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  if(oc.status !== 'recibida' && oc.status !== 'parcial'){ showToast('Solo se factura por partes una OC ya aceptada'); return; }
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  fpOCId = id;
++  const cl = clientById(oc.client_id);
++  const av = ocAvanceFactura(oc);
++  document.getElementById('fp-encabezado').innerHTML =
++    'OC <strong class="mono">'+fpEsc(oc.oc_number)+'</strong> · '+fpEsc(cl?cl.name:'—')+
++    ' · facturado '+money(av.facturado)+' de '+money(av.total)+' ('+av.pct.toFixed(0)+'%)';
++  document.getElementById('fp-folio').value = '';
++  document.getElementById('fp-fecha').value = hoyMX();
++
++  const ls = ocLineas(oc);
++  document.getElementById('fp-lineas').innerHTML = ls.length ? ls.map((l,i)=>{
++    const q = Number(l.quantity)||0;
++    const ya = ocFacturadoLinea(oc, i);
++    const pend = Math.max(0, q - ya);
++    return '<div style="display:grid;grid-template-columns:0.8fr 2fr 1fr 1fr 1.2fr;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;">'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Código</div><span class="mono">'+fpEsc(l.codigo||'—')+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Producto</div>'+fpEsc(l.product||'—')+'</div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Pedidas</div><span class="mono">'+qty(q)+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Ya facturadas</div><span class="mono">'+qty(ya)+'</span></div>'+
++      '<div class="field" style="margin:0;"><label>Facturar ahora (máx '+qty(pend)+')</label>'+
++        '<input type="number" class="fp-qty" data-idx="'+i+'" min="0" max="'+pend+'" step="1" value="0" '+(pend<=0?'disabled':'')+' oninput="fpResumen()"></div>'+
++    '</div>';
++  }).join('') : '<div class="empty">Esta OC no tiene líneas de producto</div>';
++
++  document.getElementById('fp-historial').innerHTML = fpHistorialHTML(oc);
++  fpResumen();
++  document.getElementById('modal-oc-parcial').classList.add('active');
++}
++
++/* Lo que se está capturando ahora, en piezas y en dinero. */
++function fpResumen(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc) return;
++  const ls = ocLineas(oc);
++  let val = 0, piezas = 0;
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    const l = ls[i] || {};
++    val += n * (Number(l.unit_price)||0);
++    piezas += n;
++  });
++  const av = ocAvanceFactura(oc);
++  const resto = Math.max(0, av.resto - val);
++  document.getElementById('fp-resumen').innerHTML =
++    'Esta parcialidad: <strong>'+qty(piezas)+'</strong> pieza(s) · <strong>'+money(val)+'</strong> sin IVA ('+money(val*1.16)+' con IVA) · quedaría pendiente '+money(resto) +
++    ((val > 0 && resto <= 0.000001) ? ' — <span style="color:var(--teal);font-weight:600;">con esto la OC queda facturada por completo y se archiva</span>' : '');
++}
++
++function fpHistorialHTML(oc){
++  const fs = ocFacturas(oc);
++  if(!fs.length) return '';
++  const ls = ocLineas(oc);
++  return '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Parcialidades ya registradas</div>' +
++    fs.map(f=>{
++      const det = ocFacturaLineas(f).filter(l=>(Number(l.cantidad)||0)>0).map(l=>{
++        const base = ls[Number(l.i)] || {};
++        return fpEsc(l.product || base.product || base.codigo || '—')+': '+qty(Number(l.cantidad)||0);
++      }).join(' · ');
++      const val = ocFacturaLineas(f).reduce((a,l)=>{
++        const base = ls[Number(l.i)] || {};
++        return a + (Number(l.cantidad)||0) * (Number(base.unit_price)||0);
++      }, 0);
++      return '<div style="font-size:12px;padding:6px 0;border-top:1px solid var(--line);">'+
++        '<span class="mono" style="font-weight:600;">'+fpEsc(f.folio || 'sin folio')+'</span>'+
++        '<span style="color:var(--muted);"> · '+fpEsc(f.fecha||'—')+' · '+money(val)+
++        (f.registradoPor?' · '+fpEsc(f.registradoPor):'')+'</span>'+
++        '<div style="color:var(--muted);font-size:11px;margin-top:2px;">'+(det||'—')+'</div></div>';
++    }).join('');
++}
++
++function guardarFacturaParcial(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  const folio = document.getElementById('fp-folio').value.trim();
++  const fecha = document.getElementById('fp-fecha').value || hoyMX();
++  const ls = ocLineas(oc);
++  const captura = [];
++  let excede = '';
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    if(n <= 0) return;
++    const l = ls[i] || {};
++    if(n > ocPendienteLinea(oc, i) + 0.000001){ excede = l.product || l.codigo || ('línea '+(i+1)); return; }
++    captura.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:n});
++  });
++  if(excede){ showToast('No puedes facturar más de lo que falta en «'+excede+'»'); return; }
++  if(!captura.length){ showToast('Captura al menos una pieza para facturar'); return; }
++  if(!folio && !confirm('Vas a guardar esta parcialidad sin folio de factura.\n\n¿Continuar?')) return;
++  closeModal('modal-oc-parcial');
++  setClientOCStatus(oc.id, 'parcial', {parcial:{folio:folio, fecha:fecha, lineas:captura}});
++}
++
++/* Marca una OC como facturada y la manda al archivo.
++   Si ya tiene parcialidades, el botón $ cierra únicamente el remanente. */
+ /* Facturar también lo autoriza el administrador. */
+ function marcarFacturada(id){
+   const oc = (DB.clientOCs||[]).find(o=>o.id===id);
+   if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++
++  if(ocFacturas(oc).length){
++    const resto = [];
++    ocLineas(oc).forEach((l,i)=>{
++      const pend = ocPendienteLinea(oc, i);
++      if(pend > 0) resto.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:pend});
++    });
++    if(!resto.length){
++      setClientOCStatus(id, 'facturada', {factura_numero:oc.factura_numero||'', factura_fecha:oc.factura_fecha||hoyMX()});
++      return;
++    }
++    const av = ocAvanceFactura(oc);
++    const folio = prompt('Cerrar el remanente de la OC '+oc.oc_number+'.\n\nFaltan '+money(av.resto)+' sin IVA ('+(100-av.pct).toFixed(0)+'% de la orden).\n\nFolio de la factura del remanente (opcional):', '');
++    if(folio===null) return;
++    setClientOCStatus(id, 'parcial', {parcial:{folio:folio.trim(), fecha:hoyMX(), lineas:resto}});
++    return;
++  }
++
+   if(!esAdminActual()){ setClientOCStatus(id, 'facturada'); return; }
+   const num = prompt('Número de factura para la OC ' + oc.oc_number + ' (opcional):', oc.factura_numero||'');
+   if(num===null) return;
+   setClientOCStatus(id, 'facturada', {factura_numero:num.trim(), factura_fecha:hoyMX()});
+ }
++
++/* Reabrir una OC del archivo: regresa a Aceptada conservando el número de
++   factura y las parcialidades, y queda asentado en el historial de
++   autorizaciones (como cualquier otro cambio de estatus). */
++function reabrirOCFacturada(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  const nParc = ocFacturas(oc).length;
++  const conFactura = oc.factura_numero
++    ? '\n\nSe conserva la factura '+oc.factura_numero+(oc.factura_fecha?' ('+oc.factura_fecha+')':'')+'.' : '';
++  const conParciales = nParc ? '\nLas '+nParc+' parcialidad(es) registradas no se borran.' : '';
++  if(!confirm('¿Regresar la OC '+oc.oc_number+' a Aceptada?\n\nSale del archivo y vuelve a las órdenes activas.'+conFactura+conParciales)) return;
++  setClientOCStatus(id, 'recibida', {motivo:'Reapertura de OC facturada'+(oc.factura_numero?' — factura '+oc.factura_numero:'')});
++}
+ /* ══════════ AUTORIZACIÓN DEL ADMINISTRADOR ══════════
+    Ningún cambio de estatus de una OC de cliente surte efecto si no lo
+    autoriza un administrador: aceptar, rechazar, facturar y regresar a
+@@ -3709,7 +3928,7 @@ function marcarFacturada(id){
+    cliente sigue viendo 'Pendiente' hasta que el admin la acepte.
+    Nada se pierde: cada solicitud y cada decisión se agregan a
+    oc.autorizaciones, que solo crece.                                  */
+-const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', facturada:'Facturar', rechazada:'Rechazar'};
++const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', parcial:'Facturar parcialmente', facturada:'Facturar', rechazada:'Rechazar'};
+ 
+ function esAdminActual(){ return currentRole === 'admin'; }
+ 
+@@ -3725,6 +3944,37 @@ function ocRegistrarAutorizacion(oc, entrada){
+ 
+ function ocAplicarEstatus(oc, accion, extra){
+   const e = extra || {};
++  /* Facturación parcial: no es un estatus que se ponga a mano, es el
++     resultado de sumar parcialidades. Se guarda la parcialidad y la OC
++     se acomoda sola: 'parcial' mientras falte algo, 'facturada' cuando
++     ya no falta nada. */
++  if(accion === 'parcial'){
++    const p = e.parcial || {};
++    const lineas = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas || {}))
++                     .filter(l => l && (Number(l.cantidad)||0) > 0)
++                     .map(l => ({i:Number(l.i)||0, codigo:l.codigo||'', product:l.product||'', cantidad:Number(l.cantidad)||0}));
++    oc.facturas = ocFacturas(oc).slice();
++    oc.facturas.push({
++      id: uid('fac'),
++      folio: (p.folio||'').trim(),
++      fecha: p.fecha || hoyMX(),
++      lineas: lineas,
++      registradoPor: usuarioActual(),
++      registradoEn: new Date().toISOString()
++    });
++    if(ocFacturaCompleta(oc)){
++      oc.status = 'facturada';
++      const ult = oc.facturas[oc.facturas.length-1];
++      oc.factura_numero = oc.factura_numero || ult.folio || '';
++      oc.factura_fecha  = ult.fecha || hoyMX();
++    } else {
++      oc.status = 'parcial';
++    }
++    oc.statusUpdatedAt = new Date().toISOString();
++    oc.statusUpdatedBy = usuarioActual();
++    oc.autorizacion_pendiente = null;
++    return;
++  }
+   oc.status = accion;
+   if(accion === 'facturada'){
+     oc.factura_numero = e.factura_numero !== undefined ? e.factura_numero : (oc.factura_numero||'');
+@@ -3757,6 +4007,7 @@ function setClientOCStatus(id, newStatus, extra){
+       desde: oc.status || 'pendiente',
+       motivo: nota.trim(),
+       factura_numero: (extra && extra.factura_numero) || '',
++      parcial: (extra && extra.parcial) || null,
+       solicitadoPor: usuarioActual(),
+       solicitadoEn: ahora
+     };
+@@ -3767,8 +4018,15 @@ function setClientOCStatus(id, newStatus, extra){
+   }
+ 
+   ocAplicarEstatus(oc, newStatus, extra);
+-  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora});
++  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora, motivo:(extra && extra.motivo) || ''});
+   ocRefrescar();
++  if(newStatus === 'parcial'){
++    const av = ocAvanceFactura(oc);
++    showToast(oc.status === 'facturada'
++      ? 'OC '+oc.oc_number+' facturada por completo — se archivó'
++      : 'Parcialidad registrada — OC '+oc.oc_number+' va al '+av.pct.toFixed(0)+'%, faltan '+money(av.resto));
++    return;
++  }
+   showToast('OC '+oc.oc_number+': '+etiqueta.toLowerCase()+' — autorizado');
+ }
+ 
+@@ -3786,6 +4044,12 @@ function autorizarOC(id){
+     if(num===null) return;
+     extra.factura_numero = num.trim();
+     extra.factura_fecha = hoyMX();
++  } else if(sol.accion === 'parcial'){
++    const p = sol.parcial || {};
++    const det = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas||{}))
++                  .map(l=>'· '+(l.product||l.codigo||'—')+': '+qty(Number(l.cantidad)||0)).join('\n');
++    if(!confirm('¿Autorizar la facturación parcial de la OC '+oc.oc_number+'?\n\nFolio: '+(p.folio||'sin folio')+'   Fecha: '+(p.fecha||hoyMX())+'\n\n'+det+'\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
++    extra.parcial = p;
+   } else {
+     if(!confirm('¿Autorizar «'+etiqueta+'» para la OC '+oc.oc_number+'?\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
+   }
+@@ -5961,7 +6225,7 @@ function fechaOC(o){
+ }
+ function pasaEstado(st){
+   if(S.estados==='todas') return true;
+-  if(S.estados==='cerradas') return st==='recibida'||st==='facturada';
++  if(S.estados==='cerradas') return st==='recibida'||st==='parcial'||st==='facturada';
+   return st!=='rechazada'&&st!=='cancelada'&&st!=='borrador';
+ }
+ 
+diff --git a/Portal-OC-InternoV2.html b/Portal-OC-InternoV2.html
+index a750295..e957c50 100644
+--- a/Portal-OC-InternoV2.html
++++ b/Portal-OC-InternoV2.html
+@@ -618,7 +618,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+           <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+             <select id="oc-filter-client" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;"><option value="">Todos los clientes</option></select>
+             <select id="oc-filter-status" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+-              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
++              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="parcial">Facturada parcialmente</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
+             </select>
+             <select id="oc-filter-days" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+               <option value="0">Todas las fechas</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="120">Últimos 120 días</option><option value="180">Últimos 180 días</option>
+@@ -1010,6 +1010,26 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+   </div>
+ </div>
+ 
++<div class="modal-overlay" id="modal-oc-parcial">
++  <div class="modal wide">
++    <button class="modal-close" onclick="closeModal('modal-oc-parcial')">×</button>
++    <h2>Facturación parcial</h2>
++    <div id="fp-encabezado" class="small-note" style="margin-bottom:14px;"></div>
++    <div class="formrow">
++      <div class="field"><label>Folio de la factura</label><input type="text" id="fp-folio" placeholder="A-1234"></div>
++      <div class="field"><label>Fecha de la factura</label><input type="date" id="fp-fecha"></div>
++    </div>
++    <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Piezas que se facturan en esta parcialidad</div>
++    <div id="fp-lineas"></div>
++    <div id="fp-resumen" style="margin-top:10px;font-size:12.5px;color:var(--muted);"></div>
++    <div id="fp-historial" style="margin-top:16px;"></div>
++    <div class="modal-actions">
++      <button class="btn btn-secondary" onclick="closeModal('modal-oc-parcial')">Cancelar</button>
++      <button class="btn btn-primary" onclick="guardarFacturaParcial()">Guardar parcialidad</button>
++    </div>
++  </div>
++</div>
++
+ <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
+ 
+ <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+@@ -1306,7 +1326,7 @@ function normalizeDB(d){
+   d.purchaseOrders = toArr(d.purchaseOrders);
+   d.clientOCs = toArr(d.clientOCs);
+   d.notifEmails = toArr(d.notifEmails);
+-  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); });
++  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); if(o.facturas){ o.facturas = toArr(o.facturas); o.facturas.forEach(f=>{ if(f && f.lineas) f.lineas = toArr(f.lineas); }); } });
+   return d;
+ }
+ let DB = seedData();
+@@ -1897,12 +1917,13 @@ function renderInicio(){
+ const RMC_ESTATUS = [
+   {k:'pendiente', label:'Pendiente',     color:'var(--kraft)'},
+   {k:'recibida',  label:'En producción', color:'var(--teal)'},
++  {k:'parcial',   label:'Parcial',       color:'#C08A3E'},
+   {k:'facturada', label:'Facturada',     color:'var(--muted)'}
+ ];
+ const RMC_MESES_NOM = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+ let rmcNMeses = 0;   // 0 = solo los meses que tienen OCs (dentro de los ultimos 12)
+ let rmcHasta  = '';
+-let rmcSel    = {pendiente:true, recibida:true, facturada:true};
++let rmcSel    = {pendiente:true, recibida:true, parcial:true, facturada:true};
+ let rmcIVA    = false;
+ 
+ function rmcValorOC(o){
+@@ -1951,7 +1972,7 @@ function rmcCalcular(){
+     const cl = clientById(o.client_id);
+     const nombre = cl ? cl.name : 'Sin cliente';
+     const r = porCliente[nombre] || (porCliente[nombre] = {
+-      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, facturada:0}
++      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, parcial:0, facturada:0}
+     });
+     const v = rmcValorOC(o) * f;
+     r.n++; r.total += v;
+@@ -1962,7 +1983,7 @@ function rmcCalcular(){
+   const filas  = Object.values(porCliente).filter(r=>r.total > 0).sort((a,b)=>b.total - a.total);
+   const totMes = {}; meses.forEach(m=> totMes[m] = filas.reduce((s,r)=> s + (r.meses[m]||0), 0));
+   const total  = filas.reduce((s,r)=> s + r.total, 0);
+-  const totEst = {pendiente:0, recibida:0, facturada:0};
++  const totEst = {pendiente:0, recibida:0, parcial:0, facturada:0};
+   filas.forEach(r=> RMC_ESTATUS.forEach(e=> totEst[e.k] += r.est[e.k]));
+   const nOCs   = filas.reduce((s,r)=> s + r.n, 0);
+   const maxCel = Math.max(1, ...filas.map(r=> Math.max(...meses.map(m=> r.meses[m]||0))));
+@@ -2062,7 +2083,7 @@ function rmcExport(){
+   d.filas.forEach(r=> rows.push([r.nombre, r.n, ...d.meses.map(m=>Math.round(r.meses[m]||0)), Math.round(r.total), ...RMC_ESTATUS.map(e=>Math.round(r.est[e.k]))]));
+   rows.push(['Total', d.nOCs, ...d.meses.map(m=>Math.round(d.totMes[m])), Math.round(d.total), ...RMC_ESTATUS.map(e=>Math.round(d.totEst[e.k]))]);
+   const ws = XLSX.utils.aoa_to_sheet(rows);
+-  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, {wch:13},{wch:14},{wch:13}];
++  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, ...RMC_ESTATUS.map(()=>({wch:14}))];
+   const wb = XLSX.utils.book_new();
+   XLSX.utils.book_append_sheet(wb, ws, 'Resumen por cliente');
+   XLSX.writeFile(wb, 'Resumen_OCs_por_cliente_' + d.meses[0] + '_a_' + d.meses[d.meses.length-1] + (rmcIVA?'_conIVA':'_sinIVA') + '.xlsx');
+@@ -2116,11 +2137,11 @@ function renderOCCharts(){
+     </div>`).join('') : '<div class="empty" style="padding:20px;">Sin OCs en este período</div>';
+ 
+   // Status donut
+-  const byStatus = {pendiente:0, recibida:0, facturada:0, rechazada:0};
++  const byStatus = {pendiente:0, recibida:0, parcial:0, facturada:0, rechazada:0};
+   filtered.forEach(o=>{ byStatus[o.status||'pendiente']++; });
+   const total = filtered.length || 1;
+-  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',facturada:'#6B7A8D',rechazada:'#A63A3A'};
+-  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',facturada:'Facturadas',rechazada:'Rechazadas'};
++  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',parcial:'#C08A3E',facturada:'#6B7A8D',rechazada:'#A63A3A'};
++  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',parcial:'Parciales',facturada:'Facturadas',rechazada:'Rechazadas'};
+   document.getElementById('oc-status-chart').innerHTML = Object.entries(byStatus).map(([s,n])=>`
+     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+       <div style="width:10px;height:10px;border-radius:50%;background:${statusColors[s]};"></div>
+@@ -2170,7 +2191,7 @@ function renderOCCharts(){
+   const ocValues = filtered.map(o=>(o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0));
+   const avgTicket = ocValues.length ? ocValues.reduce((s,v)=>s+v,0)/ocValues.length : 0;
+   const avgProducts = filtered.length ? filtered.reduce((s,o)=>s+(o.lines||[]).length,0)/filtered.length : 0;
+-  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='facturada').length;
++  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='parcial'||o.status==='facturada').length;
+   const acceptRate = filtered.length ? (accepted/filtered.length*100) : 0;
+ 
+   document.getElementById('kpi-avg-ticket').textContent = moneyShort(avgTicket);
+@@ -2511,17 +2532,19 @@ function renderClientOCs(){
+   const esActiva = o => !['facturada','rechazada'].includes(o.status);
+   const conteos = {
+     activas:    todas.filter(esActiva).length,
++    parciales:  todas.filter(o=>o.status==='parcial').length,
+     facturadas: todas.filter(o=>o.status==='facturada').length,
+     rechazadas: todas.filter(o=>o.status==='rechazada').length,
+     todas:      todas.length
+   };
+-  const pills = [['activas','Activas'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
++  const pills = [['activas','Activas'],['parciales','Parciales'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
+   document.getElementById('cd-oc-filters').innerHTML = pills.map(([k,label])=>
+     `<button class="btn ${cdOCFiltro===k?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:5px 12px;" onclick="setClientOCFilter('${k}')">${label} (${conteos[k]})</button>`
+   ).join('');
+ 
+   const list = cdOCFiltro==='todas' ? todas
+              : cdOCFiltro==='activas' ? todas.filter(esActiva)
++             : cdOCFiltro==='parciales' ? todas.filter(o=>o.status==='parcial')
+              : todas.filter(o=>o.status===cdOCFiltro.replace(/s$/,''));
+ 
+   const totalDe = arr => arr.reduce((s,o)=>s+(o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0)*1.16, 0);
+@@ -2533,6 +2556,7 @@ function renderClientOCs(){
+   const badgeDe = st => st==='facturada'
+       ? '<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>'
+       : st==='rechazada' ? '<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>'
++      : st==='parcial'   ? '<span class="badge" style="font-size:10px;background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Parcial</span>'
+       : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Aceptada</span>'
+       : '<span class="badge badge-borrador" style="font-size:10px;">Pendiente</span>';
+ 
+@@ -2544,8 +2568,9 @@ function renderClientOCs(){
+         (lines.length>2 ? `<div style="color:var(--muted);font-size:11px;">+${lines.length-2} más</div>` : '')
+       : '—';
+     const urg = o.urgente ? ' <span class="badge badge-match-no" style="font-size:9px;">URGENTE</span>' : '';
+-    const facturar = o.status==='recibida'
+-      ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada" onclick="marcarFacturada('${o.id}')">$</button>` : '';
++    const puedeFactCD = o.status==='recibida' || o.status==='parcial';
++    const facturar = puedeFactCD
++      ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="Facturar parcialmente" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button><button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial'?'Cerrar el remanente':'Marcar facturada'}" onclick="marcarFacturada('${o.id}')">$</button>` : '';
+     const file = o.fileName
+       ? `<button class="btn btn-ghost" style="font-size:12px;color:var(--teal);" title="Ver ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}','view')">👁</button>
+          <button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="Descargar ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
+@@ -2557,7 +2582,7 @@ function renderClientOCs(){
+       <td style="font-size:12px;">${prods}</td>
+       <td>${o.date_submitted||'—'}</td>
+       <td style="text-align:right;font-weight:600;">${money(sub*1.16)}</td>
+-      <td class="mono" style="font-size:11px;">${o.factura_numero||'—'}</td>
++      <td class="mono" style="font-size:11px;">${o.status==='parcial' ? ocFacturas(o).length+' parcial(es) · '+ocAvanceFactura(o).pct.toFixed(0)+'%' : (o.factura_numero||'—')}</td>
+       <td>${badgeDe(o.status||'pendiente')}</td>
+       <td style="text-align:right;white-space:nowrap;">${facturar}${file}</td>
+     </tr>`;
+@@ -3612,11 +3637,16 @@ function renderPOList(){
+         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
+         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
+         const solPend = ocSolicitudPendiente(o);
+-        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        const avanceOC = ocAvanceFactura(o);
++        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='parcial' ? '<span class="badge" style="background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Facturada parcial</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        /* Barra de avance: cuanto de la OC ya se facturó, en valor. */
++        const barraParcial = o.status==='parcial'
++          ? `<div style="margin-top:5px;max-width:140px;"><div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;height:7px;overflow:hidden;"><div style="width:${avanceOC.pct.toFixed(1)}%;height:100%;background:#C08A3E;"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.45;">${avanceOC.pct.toFixed(0)}% facturado · faltan ${money(avanceOC.resto)}<br>${ocFacturas(o).length} parcialidad(es)</div></div>`
++          : '';
+         /* En revisión: el asociado ya pidió el cambio y falta que lo autorice el admin. */
+         const statusBadge = solPend
+-          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>'
+-          : badgeBase;
++          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>' + barraParcial
++          : badgeBase + barraParcial;
+         const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
+         const alertaBadge = chequeo.nivel==='bad'
+           ? '<div style="margin-top:4px;"><span class="badge badge-match-no" style="font-size:10px;">⛔ REVISAR PRECIO</span></div>'
+@@ -3638,7 +3668,15 @@ function renderPOList(){
+         } else if(o.status==='pendiente'){
+           ocBotones = `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" title="${esAdmin?'Aceptar la OC':'Pedir autorización para aceptar'}" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" title="${esAdmin?'Rechazar la OC':'Pedir autorización para rechazar'}" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>`;
+         } else {
+-          ocBotones = `${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar'}" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
++          /* Aceptada o parcial: se puede facturar por partes (½) o cerrar el total ($). */
++          const puedeFacturarOC = o.status==='recibida' || o.status==='parcial';
++          const btnParcialOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="${esAdmin?'Registrar una facturación parcial':'Pedir autorización de una facturación parcial'}" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button>`
++            : '';
++          const btnTotalOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial' ? (esAdmin?'Cerrar el remanente y archivar':'Pedir autorización para cerrar el remanente') : (esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar')}" onclick="marcarFacturada('${o.id}')">$</button>`
++            : '';
++          ocBotones = `${btnParcialOC}${btnTotalOC}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
+         }
+         const actions = `<div style="display:flex;gap:4px;">${editBtn}${ocBotones}${delBtn}</div>`;
+         html += `<tr style="${chequeo.nivel==='bad'?'box-shadow:inset 4px 0 0 #A63A3A;':chequeo.nivel==='warn'?'box-shadow:inset 4px 0 0 #C08A3E;':''}"><td class="mono">${o.oc_number}${urgentBadge}${alertaBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
+@@ -3675,7 +3713,9 @@ function renderOCArchivo(list){
+     const badge = esFact
+       ? `<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>`
+       : `<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>`;
+-    const fact = o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '';
++    const nParc = ocFacturas(o).length;
++    const fact = (o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '')
++               + (nParc ? `<span style="font-size:11px;color:var(--muted);"> · ${nParc} parcialidad(es)</span>` : '');
+     html += `<tr style="font-size:12px;background:#fff;">
+       <td class="mono" style="padding:6px 10px;">${o.oc_number}</td>
+       <td colspan="2" style="padding:6px 10px;color:var(--muted);">${cl?cl.name:'—'}${fact}</td>
+@@ -3684,23 +3724,202 @@ function renderOCArchivo(list){
+       <td style="padding:6px 10px;">${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;">👁 ver</a> <a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;">⬇</a>` : '—'}</td>
+       <td style="padding:6px 10px;">${badge}</td>
+       <td style="padding:6px 10px;"><div style="display:flex;gap:4px;">
+-        <button class="btn btn-ghost" style="font-size:11px;" title="Regresar a activas" onclick="setClientOCStatus('${o.id}','recibida')">↩</button>
++        ${esFact && currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" title="Editar esta OC facturada" onclick="openPOModal('${o.id}')">✏</button>` : ''}
++        <button class="btn btn-ghost" style="font-size:11px;" title="${esFact?'Regresar a Aceptada conservando el número de factura':'Regresar a activas'}" onclick="${esFact ? `reabrirOCFacturada('${o.id}')` : `setClientOCStatus('${o.id}','recibida')`}">↩</button>
+         ${currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : ''}
+       </div></td></tr>`;
+   });
+   return html;
+ }
+ 
+-/* Marca una OC como facturada y la manda al archivo */
++/* ══════════ FACTURACIÓN PARCIAL DE OCs ══════════
++   Una OC aceptada casi nunca se factura de un jalón: salen 20 mil de las
++   50 mil piezas y ésas ya se cobran. Cada parcialidad se guarda en
++   oc.facturas = [{id, folio, fecha, lineas:[{i, codigo, product, cantidad}]}],
++   donde 'i' es la posición de la línea dentro de oc.lines.
++   Mientras falten piezas la OC se queda en activas con estatus 'parcial'
++   y barra de avance; cuando ya no falta nada pasa sola a 'facturada' y se
++   archiva. Nada se borra: las parcialidades se conservan aunque la OC se
++   reabra desde el archivo.                                              */
++/* esc() del bloque CRM vive dentro de un IIFE; aquí se ocupa uno propio. */
++function fpEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
++function ocLineas(o){ return Array.isArray(o && o.lines) ? o.lines : Object.values((o && o.lines) || {}); }
++function ocFacturas(o){ return Array.isArray(o && o.facturas) ? o.facturas : Object.values((o && o.facturas) || {}); }
++function ocFacturaLineas(f){ return Array.isArray(f && f.lineas) ? f.lineas : Object.values((f && f.lineas) || {}); }
++
++/* Piezas ya facturadas de una línea, sumando todas las parcialidades. */
++function ocFacturadoLinea(o, idx){
++  return ocFacturas(o).reduce((s,f)=> s + ocFacturaLineas(f).reduce((a,l)=>
++    a + (Number(l && l.i) === Number(idx) ? (Number(l.cantidad)||0) : 0), 0), 0);
++}
++function ocPendienteLinea(o, idx){
++  const l = ocLineas(o)[idx] || {};
++  return Math.max(0, (Number(l.quantity)||0) - ocFacturadoLinea(o, idx));
++}
++/* Avance en dinero: lo facturado contra el valor total de la OC, sin IVA. */
++function ocAvanceFactura(o){
++  let total = 0, fact = 0;
++  ocLineas(o).forEach((l,i)=>{
++    const q = Number(l.quantity)||0, pu = Number(l.unit_price)||0;
++    total += q*pu;
++    fact  += Math.min(q, ocFacturadoLinea(o,i))*pu;
++  });
++  const pct = total > 0 ? Math.min(100, fact/total*100) : 0;
++  return {total:total, facturado:fact, resto:Math.max(0, total-fact), pct:pct};
++}
++function ocFacturaCompleta(o){
++  const ls = ocLineas(o);
++  if(!ls.length) return false;
++  return ls.every((l,i)=> ocFacturadoLinea(o,i) >= (Number(l.quantity)||0) - 0.000001);
++}
++
++/* ---- Modal de captura de una parcialidad ---- */
++let fpOCId = null;
++
++function abrirFacturaParcial(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  if(oc.status !== 'recibida' && oc.status !== 'parcial'){ showToast('Solo se factura por partes una OC ya aceptada'); return; }
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  fpOCId = id;
++  const cl = clientById(oc.client_id);
++  const av = ocAvanceFactura(oc);
++  document.getElementById('fp-encabezado').innerHTML =
++    'OC <strong class="mono">'+fpEsc(oc.oc_number)+'</strong> · '+fpEsc(cl?cl.name:'—')+
++    ' · facturado '+money(av.facturado)+' de '+money(av.total)+' ('+av.pct.toFixed(0)+'%)';
++  document.getElementById('fp-folio').value = '';
++  document.getElementById('fp-fecha').value = hoyMX();
++
++  const ls = ocLineas(oc);
++  document.getElementById('fp-lineas').innerHTML = ls.length ? ls.map((l,i)=>{
++    const q = Number(l.quantity)||0;
++    const ya = ocFacturadoLinea(oc, i);
++    const pend = Math.max(0, q - ya);
++    return '<div style="display:grid;grid-template-columns:0.8fr 2fr 1fr 1fr 1.2fr;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;">'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Código</div><span class="mono">'+fpEsc(l.codigo||'—')+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Producto</div>'+fpEsc(l.product||'—')+'</div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Pedidas</div><span class="mono">'+qty(q)+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Ya facturadas</div><span class="mono">'+qty(ya)+'</span></div>'+
++      '<div class="field" style="margin:0;"><label>Facturar ahora (máx '+qty(pend)+')</label>'+
++        '<input type="number" class="fp-qty" data-idx="'+i+'" min="0" max="'+pend+'" step="1" value="0" '+(pend<=0?'disabled':'')+' oninput="fpResumen()"></div>'+
++    '</div>';
++  }).join('') : '<div class="empty">Esta OC no tiene líneas de producto</div>';
++
++  document.getElementById('fp-historial').innerHTML = fpHistorialHTML(oc);
++  fpResumen();
++  document.getElementById('modal-oc-parcial').classList.add('active');
++}
++
++/* Lo que se está capturando ahora, en piezas y en dinero. */
++function fpResumen(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc) return;
++  const ls = ocLineas(oc);
++  let val = 0, piezas = 0;
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    const l = ls[i] || {};
++    val += n * (Number(l.unit_price)||0);
++    piezas += n;
++  });
++  const av = ocAvanceFactura(oc);
++  const resto = Math.max(0, av.resto - val);
++  document.getElementById('fp-resumen').innerHTML =
++    'Esta parcialidad: <strong>'+qty(piezas)+'</strong> pieza(s) · <strong>'+money(val)+'</strong> sin IVA ('+money(val*1.16)+' con IVA) · quedaría pendiente '+money(resto) +
++    ((val > 0 && resto <= 0.000001) ? ' — <span style="color:var(--teal);font-weight:600;">con esto la OC queda facturada por completo y se archiva</span>' : '');
++}
++
++function fpHistorialHTML(oc){
++  const fs = ocFacturas(oc);
++  if(!fs.length) return '';
++  const ls = ocLineas(oc);
++  return '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Parcialidades ya registradas</div>' +
++    fs.map(f=>{
++      const det = ocFacturaLineas(f).filter(l=>(Number(l.cantidad)||0)>0).map(l=>{
++        const base = ls[Number(l.i)] || {};
++        return fpEsc(l.product || base.product || base.codigo || '—')+': '+qty(Number(l.cantidad)||0);
++      }).join(' · ');
++      const val = ocFacturaLineas(f).reduce((a,l)=>{
++        const base = ls[Number(l.i)] || {};
++        return a + (Number(l.cantidad)||0) * (Number(base.unit_price)||0);
++      }, 0);
++      return '<div style="font-size:12px;padding:6px 0;border-top:1px solid var(--line);">'+
++        '<span class="mono" style="font-weight:600;">'+fpEsc(f.folio || 'sin folio')+'</span>'+
++        '<span style="color:var(--muted);"> · '+fpEsc(f.fecha||'—')+' · '+money(val)+
++        (f.registradoPor?' · '+fpEsc(f.registradoPor):'')+'</span>'+
++        '<div style="color:var(--muted);font-size:11px;margin-top:2px;">'+(det||'—')+'</div></div>';
++    }).join('');
++}
++
++function guardarFacturaParcial(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  const folio = document.getElementById('fp-folio').value.trim();
++  const fecha = document.getElementById('fp-fecha').value || hoyMX();
++  const ls = ocLineas(oc);
++  const captura = [];
++  let excede = '';
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    if(n <= 0) return;
++    const l = ls[i] || {};
++    if(n > ocPendienteLinea(oc, i) + 0.000001){ excede = l.product || l.codigo || ('línea '+(i+1)); return; }
++    captura.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:n});
++  });
++  if(excede){ showToast('No puedes facturar más de lo que falta en «'+excede+'»'); return; }
++  if(!captura.length){ showToast('Captura al menos una pieza para facturar'); return; }
++  if(!folio && !confirm('Vas a guardar esta parcialidad sin folio de factura.\n\n¿Continuar?')) return;
++  closeModal('modal-oc-parcial');
++  setClientOCStatus(oc.id, 'parcial', {parcial:{folio:folio, fecha:fecha, lineas:captura}});
++}
++
++/* Marca una OC como facturada y la manda al archivo.
++   Si ya tiene parcialidades, el botón $ cierra únicamente el remanente. */
+ /* Facturar también lo autoriza el administrador. */
+ function marcarFacturada(id){
+   const oc = (DB.clientOCs||[]).find(o=>o.id===id);
+   if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++
++  if(ocFacturas(oc).length){
++    const resto = [];
++    ocLineas(oc).forEach((l,i)=>{
++      const pend = ocPendienteLinea(oc, i);
++      if(pend > 0) resto.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:pend});
++    });
++    if(!resto.length){
++      setClientOCStatus(id, 'facturada', {factura_numero:oc.factura_numero||'', factura_fecha:oc.factura_fecha||hoyMX()});
++      return;
++    }
++    const av = ocAvanceFactura(oc);
++    const folio = prompt('Cerrar el remanente de la OC '+oc.oc_number+'.\n\nFaltan '+money(av.resto)+' sin IVA ('+(100-av.pct).toFixed(0)+'% de la orden).\n\nFolio de la factura del remanente (opcional):', '');
++    if(folio===null) return;
++    setClientOCStatus(id, 'parcial', {parcial:{folio:folio.trim(), fecha:hoyMX(), lineas:resto}});
++    return;
++  }
++
+   if(!esAdminActual()){ setClientOCStatus(id, 'facturada'); return; }
+   const num = prompt('Número de factura para la OC ' + oc.oc_number + ' (opcional):', oc.factura_numero||'');
+   if(num===null) return;
+   setClientOCStatus(id, 'facturada', {factura_numero:num.trim(), factura_fecha:hoyMX()});
+ }
++
++/* Reabrir una OC del archivo: regresa a Aceptada conservando el número de
++   factura y las parcialidades, y queda asentado en el historial de
++   autorizaciones (como cualquier otro cambio de estatus). */
++function reabrirOCFacturada(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  const nParc = ocFacturas(oc).length;
++  const conFactura = oc.factura_numero
++    ? '\n\nSe conserva la factura '+oc.factura_numero+(oc.factura_fecha?' ('+oc.factura_fecha+')':'')+'.' : '';
++  const conParciales = nParc ? '\nLas '+nParc+' parcialidad(es) registradas no se borran.' : '';
++  if(!confirm('¿Regresar la OC '+oc.oc_number+' a Aceptada?\n\nSale del archivo y vuelve a las órdenes activas.'+conFactura+conParciales)) return;
++  setClientOCStatus(id, 'recibida', {motivo:'Reapertura de OC facturada'+(oc.factura_numero?' — factura '+oc.factura_numero:'')});
++}
+ /* ══════════ AUTORIZACIÓN DEL ADMINISTRADOR ══════════
+    Ningún cambio de estatus de una OC de cliente surte efecto si no lo
+    autoriza un administrador: aceptar, rechazar, facturar y regresar a
+@@ -3709,7 +3928,7 @@ function marcarFacturada(id){
+    cliente sigue viendo 'Pendiente' hasta que el admin la acepte.
+    Nada se pierde: cada solicitud y cada decisión se agregan a
+    oc.autorizaciones, que solo crece.                                  */
+-const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', facturada:'Facturar', rechazada:'Rechazar'};
++const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', parcial:'Facturar parcialmente', facturada:'Facturar', rechazada:'Rechazar'};
+ 
+ function esAdminActual(){ return currentRole === 'admin'; }
+ 
+@@ -3725,6 +3944,37 @@ function ocRegistrarAutorizacion(oc, entrada){
+ 
+ function ocAplicarEstatus(oc, accion, extra){
+   const e = extra || {};
++  /* Facturación parcial: no es un estatus que se ponga a mano, es el
++     resultado de sumar parcialidades. Se guarda la parcialidad y la OC
++     se acomoda sola: 'parcial' mientras falte algo, 'facturada' cuando
++     ya no falta nada. */
++  if(accion === 'parcial'){
++    const p = e.parcial || {};
++    const lineas = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas || {}))
++                     .filter(l => l && (Number(l.cantidad)||0) > 0)
++                     .map(l => ({i:Number(l.i)||0, codigo:l.codigo||'', product:l.product||'', cantidad:Number(l.cantidad)||0}));
++    oc.facturas = ocFacturas(oc).slice();
++    oc.facturas.push({
++      id: uid('fac'),
++      folio: (p.folio||'').trim(),
++      fecha: p.fecha || hoyMX(),
++      lineas: lineas,
++      registradoPor: usuarioActual(),
++      registradoEn: new Date().toISOString()
++    });
++    if(ocFacturaCompleta(oc)){
++      oc.status = 'facturada';
++      const ult = oc.facturas[oc.facturas.length-1];
++      oc.factura_numero = oc.factura_numero || ult.folio || '';
++      oc.factura_fecha  = ult.fecha || hoyMX();
++    } else {
++      oc.status = 'parcial';
++    }
++    oc.statusUpdatedAt = new Date().toISOString();
++    oc.statusUpdatedBy = usuarioActual();
++    oc.autorizacion_pendiente = null;
++    return;
++  }
+   oc.status = accion;
+   if(accion === 'facturada'){
+     oc.factura_numero = e.factura_numero !== undefined ? e.factura_numero : (oc.factura_numero||'');
+@@ -3757,6 +4007,7 @@ function setClientOCStatus(id, newStatus, extra){
+       desde: oc.status || 'pendiente',
+       motivo: nota.trim(),
+       factura_numero: (extra && extra.factura_numero) || '',
++      parcial: (extra && extra.parcial) || null,
+       solicitadoPor: usuarioActual(),
+       solicitadoEn: ahora
+     };
+@@ -3767,8 +4018,15 @@ function setClientOCStatus(id, newStatus, extra){
+   }
+ 
+   ocAplicarEstatus(oc, newStatus, extra);
+-  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora});
++  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora, motivo:(extra && extra.motivo) || ''});
+   ocRefrescar();
++  if(newStatus === 'parcial'){
++    const av = ocAvanceFactura(oc);
++    showToast(oc.status === 'facturada'
++      ? 'OC '+oc.oc_number+' facturada por completo — se archivó'
++      : 'Parcialidad registrada — OC '+oc.oc_number+' va al '+av.pct.toFixed(0)+'%, faltan '+money(av.resto));
++    return;
++  }
+   showToast('OC '+oc.oc_number+': '+etiqueta.toLowerCase()+' — autorizado');
+ }
+ 
+@@ -3786,6 +4044,12 @@ function autorizarOC(id){
+     if(num===null) return;
+     extra.factura_numero = num.trim();
+     extra.factura_fecha = hoyMX();
++  } else if(sol.accion === 'parcial'){
++    const p = sol.parcial || {};
++    const det = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas||{}))
++                  .map(l=>'· '+(l.product||l.codigo||'—')+': '+qty(Number(l.cantidad)||0)).join('\n');
++    if(!confirm('¿Autorizar la facturación parcial de la OC '+oc.oc_number+'?\n\nFolio: '+(p.folio||'sin folio')+'   Fecha: '+(p.fecha||hoyMX())+'\n\n'+det+'\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
++    extra.parcial = p;
+   } else {
+     if(!confirm('¿Autorizar «'+etiqueta+'» para la OC '+oc.oc_number+'?\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
+   }
+@@ -5961,7 +6225,7 @@ function fechaOC(o){
+ }
+ function pasaEstado(st){
+   if(S.estados==='todas') return true;
+-  if(S.estados==='cerradas') return st==='recibida'||st==='facturada';
++  if(S.estados==='cerradas') return st==='recibida'||st==='parcial'||st==='facturada';
+   return st!=='rechazada'&&st!=='cancelada'&&st!=='borrador';
+ }
+ 
+diff --git a/PortalOCInterno.html b/PortalOCInterno.html
+index a750295..e957c50 100644
+--- a/PortalOCInterno.html
++++ b/PortalOCInterno.html
+@@ -618,7 +618,7 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+           <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;">
+             <select id="oc-filter-client" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;"><option value="">Todos los clientes</option></select>
+             <select id="oc-filter-status" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+-              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
++              <option value="">Todos los estados</option><option value="__alerta">⛔ Solo con alerta</option><option value="__autorizar">⏳ Por autorizar</option><option value="pendiente">Pendiente</option><option value="recibida">Aceptada</option><option value="parcial">Facturada parcialmente</option><option value="facturada">Facturada</option><option value="rechazada">Rechazada</option>
+             </select>
+             <select id="oc-filter-days" onchange="renderPOList()" style="padding:6px 10px;border:1px solid var(--line);border-radius:4px;font-size:12px;">
+               <option value="0">Todas las fechas</option><option value="30">Últimos 30 días</option><option value="90">Últimos 90 días</option><option value="120">Últimos 120 días</option><option value="180">Últimos 180 días</option>
+@@ -1010,6 +1010,26 @@ hr.hr{border:none;border-top:1px solid var(--line);margin:18px 0;}
+   </div>
+ </div>
+ 
++<div class="modal-overlay" id="modal-oc-parcial">
++  <div class="modal wide">
++    <button class="modal-close" onclick="closeModal('modal-oc-parcial')">×</button>
++    <h2>Facturación parcial</h2>
++    <div id="fp-encabezado" class="small-note" style="margin-bottom:14px;"></div>
++    <div class="formrow">
++      <div class="field"><label>Folio de la factura</label><input type="text" id="fp-folio" placeholder="A-1234"></div>
++      <div class="field"><label>Fecha de la factura</label><input type="date" id="fp-fecha"></div>
++    </div>
++    <div style="margin:16px 0 8px;font-weight:600;font-size:13px;">Piezas que se facturan en esta parcialidad</div>
++    <div id="fp-lineas"></div>
++    <div id="fp-resumen" style="margin-top:10px;font-size:12.5px;color:var(--muted);"></div>
++    <div id="fp-historial" style="margin-top:16px;"></div>
++    <div class="modal-actions">
++      <button class="btn btn-secondary" onclick="closeModal('modal-oc-parcial')">Cancelar</button>
++      <button class="btn btn-primary" onclick="guardarFacturaParcial()">Guardar parcialidad</button>
++    </div>
++  </div>
++</div>
++
+ <div class="toast" id="toast"><span class="dot"></span><span id="toast-text"></span></div>
+ 
+ <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+@@ -1306,7 +1326,7 @@ function normalizeDB(d){
+   d.purchaseOrders = toArr(d.purchaseOrders);
+   d.clientOCs = toArr(d.clientOCs);
+   d.notifEmails = toArr(d.notifEmails);
+-  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); });
++  d.clientOCs.forEach(o=>{ if(o.lines) o.lines = toArr(o.lines); if(o.facturas){ o.facturas = toArr(o.facturas); o.facturas.forEach(f=>{ if(f && f.lineas) f.lineas = toArr(f.lineas); }); } });
+   return d;
+ }
+ let DB = seedData();
+@@ -1897,12 +1917,13 @@ function renderInicio(){
+ const RMC_ESTATUS = [
+   {k:'pendiente', label:'Pendiente',     color:'var(--kraft)'},
+   {k:'recibida',  label:'En producción', color:'var(--teal)'},
++  {k:'parcial',   label:'Parcial',       color:'#C08A3E'},
+   {k:'facturada', label:'Facturada',     color:'var(--muted)'}
+ ];
+ const RMC_MESES_NOM = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+ let rmcNMeses = 0;   // 0 = solo los meses que tienen OCs (dentro de los ultimos 12)
+ let rmcHasta  = '';
+-let rmcSel    = {pendiente:true, recibida:true, facturada:true};
++let rmcSel    = {pendiente:true, recibida:true, parcial:true, facturada:true};
+ let rmcIVA    = false;
+ 
+ function rmcValorOC(o){
+@@ -1951,7 +1972,7 @@ function rmcCalcular(){
+     const cl = clientById(o.client_id);
+     const nombre = cl ? cl.name : 'Sin cliente';
+     const r = porCliente[nombre] || (porCliente[nombre] = {
+-      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, facturada:0}
++      nombre, n:0, total:0, meses:{}, est:{pendiente:0, recibida:0, parcial:0, facturada:0}
+     });
+     const v = rmcValorOC(o) * f;
+     r.n++; r.total += v;
+@@ -1962,7 +1983,7 @@ function rmcCalcular(){
+   const filas  = Object.values(porCliente).filter(r=>r.total > 0).sort((a,b)=>b.total - a.total);
+   const totMes = {}; meses.forEach(m=> totMes[m] = filas.reduce((s,r)=> s + (r.meses[m]||0), 0));
+   const total  = filas.reduce((s,r)=> s + r.total, 0);
+-  const totEst = {pendiente:0, recibida:0, facturada:0};
++  const totEst = {pendiente:0, recibida:0, parcial:0, facturada:0};
+   filas.forEach(r=> RMC_ESTATUS.forEach(e=> totEst[e.k] += r.est[e.k]));
+   const nOCs   = filas.reduce((s,r)=> s + r.n, 0);
+   const maxCel = Math.max(1, ...filas.map(r=> Math.max(...meses.map(m=> r.meses[m]||0))));
+@@ -2062,7 +2083,7 @@ function rmcExport(){
+   d.filas.forEach(r=> rows.push([r.nombre, r.n, ...d.meses.map(m=>Math.round(r.meses[m]||0)), Math.round(r.total), ...RMC_ESTATUS.map(e=>Math.round(r.est[e.k]))]));
+   rows.push(['Total', d.nOCs, ...d.meses.map(m=>Math.round(d.totMes[m])), Math.round(d.total), ...RMC_ESTATUS.map(e=>Math.round(d.totEst[e.k]))]);
+   const ws = XLSX.utils.aoa_to_sheet(rows);
+-  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, {wch:13},{wch:14},{wch:13}];
++  ws['!cols'] = [{wch:26},{wch:6}, ...d.meses.map(()=>({wch:13})), {wch:14}, ...RMC_ESTATUS.map(()=>({wch:14}))];
+   const wb = XLSX.utils.book_new();
+   XLSX.utils.book_append_sheet(wb, ws, 'Resumen por cliente');
+   XLSX.writeFile(wb, 'Resumen_OCs_por_cliente_' + d.meses[0] + '_a_' + d.meses[d.meses.length-1] + (rmcIVA?'_conIVA':'_sinIVA') + '.xlsx');
+@@ -2116,11 +2137,11 @@ function renderOCCharts(){
+     </div>`).join('') : '<div class="empty" style="padding:20px;">Sin OCs en este período</div>';
+ 
+   // Status donut
+-  const byStatus = {pendiente:0, recibida:0, facturada:0, rechazada:0};
++  const byStatus = {pendiente:0, recibida:0, parcial:0, facturada:0, rechazada:0};
+   filtered.forEach(o=>{ byStatus[o.status||'pendiente']++; });
+   const total = filtered.length || 1;
+-  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',facturada:'#6B7A8D',rechazada:'#A63A3A'};
+-  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',facturada:'Facturadas',rechazada:'Rechazadas'};
++  const statusColors = {pendiente:'#2B5D9B',recibida:'#2F6F62',parcial:'#C08A3E',facturada:'#6B7A8D',rechazada:'#A63A3A'};
++  const statusLabels = {pendiente:'Pendientes',recibida:'Aceptadas',parcial:'Parciales',facturada:'Facturadas',rechazada:'Rechazadas'};
+   document.getElementById('oc-status-chart').innerHTML = Object.entries(byStatus).map(([s,n])=>`
+     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+       <div style="width:10px;height:10px;border-radius:50%;background:${statusColors[s]};"></div>
+@@ -2170,7 +2191,7 @@ function renderOCCharts(){
+   const ocValues = filtered.map(o=>(o.lines||[]).reduce((s,l)=>s+(l.quantity||0)*(l.unit_price||0),0));
+   const avgTicket = ocValues.length ? ocValues.reduce((s,v)=>s+v,0)/ocValues.length : 0;
+   const avgProducts = filtered.length ? filtered.reduce((s,o)=>s+(o.lines||[]).length,0)/filtered.length : 0;
+-  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='facturada').length;
++  const accepted = filtered.filter(o=>o.status==='recibida'||o.status==='parcial'||o.status==='facturada').length;
+   const acceptRate = filtered.length ? (accepted/filtered.length*100) : 0;
+ 
+   document.getElementById('kpi-avg-ticket').textContent = moneyShort(avgTicket);
+@@ -2511,17 +2532,19 @@ function renderClientOCs(){
+   const esActiva = o => !['facturada','rechazada'].includes(o.status);
+   const conteos = {
+     activas:    todas.filter(esActiva).length,
++    parciales:  todas.filter(o=>o.status==='parcial').length,
+     facturadas: todas.filter(o=>o.status==='facturada').length,
+     rechazadas: todas.filter(o=>o.status==='rechazada').length,
+     todas:      todas.length
+   };
+-  const pills = [['activas','Activas'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
++  const pills = [['activas','Activas'],['parciales','Parciales'],['facturadas','Facturadas'],['rechazadas','Rechazadas'],['todas','Todas']];
+   document.getElementById('cd-oc-filters').innerHTML = pills.map(([k,label])=>
+     `<button class="btn ${cdOCFiltro===k?'btn-primary':'btn-secondary'}" style="font-size:11px;padding:5px 12px;" onclick="setClientOCFilter('${k}')">${label} (${conteos[k]})</button>`
+   ).join('');
+ 
+   const list = cdOCFiltro==='todas' ? todas
+              : cdOCFiltro==='activas' ? todas.filter(esActiva)
++             : cdOCFiltro==='parciales' ? todas.filter(o=>o.status==='parcial')
+              : todas.filter(o=>o.status===cdOCFiltro.replace(/s$/,''));
+ 
+   const totalDe = arr => arr.reduce((s,o)=>s+(o.lines||[]).reduce((a,l)=>a+(l.quantity||0)*(l.unit_price||0),0)*1.16, 0);
+@@ -2533,6 +2556,7 @@ function renderClientOCs(){
+   const badgeDe = st => st==='facturada'
+       ? '<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>'
+       : st==='rechazada' ? '<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>'
++      : st==='parcial'   ? '<span class="badge" style="font-size:10px;background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Parcial</span>'
+       : st==='recibida'  ? '<span class="badge badge-match-yes" style="font-size:10px;">Aceptada</span>'
+       : '<span class="badge badge-borrador" style="font-size:10px;">Pendiente</span>';
+ 
+@@ -2544,8 +2568,9 @@ function renderClientOCs(){
+         (lines.length>2 ? `<div style="color:var(--muted);font-size:11px;">+${lines.length-2} más</div>` : '')
+       : '—';
+     const urg = o.urgente ? ' <span class="badge badge-match-no" style="font-size:9px;">URGENTE</span>' : '';
+-    const facturar = o.status==='recibida'
+-      ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="Marcar facturada" onclick="marcarFacturada('${o.id}')">$</button>` : '';
++    const puedeFactCD = o.status==='recibida' || o.status==='parcial';
++    const facturar = puedeFactCD
++      ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="Facturar parcialmente" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button><button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial'?'Cerrar el remanente':'Marcar facturada'}" onclick="marcarFacturada('${o.id}')">$</button>` : '';
+     const file = o.fileName
+       ? `<button class="btn btn-ghost" style="font-size:12px;color:var(--teal);" title="Ver ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}','view')">👁</button>
+          <button class="btn btn-ghost" style="font-size:11px;color:var(--kraft);" title="Descargar ${o.fileName}" onclick="downloadOCFile('${o.id}','${String(o.fileName).replace(/'/g,"\\'")}')">⬇</button>` : '';
+@@ -2557,7 +2582,7 @@ function renderClientOCs(){
+       <td style="font-size:12px;">${prods}</td>
+       <td>${o.date_submitted||'—'}</td>
+       <td style="text-align:right;font-weight:600;">${money(sub*1.16)}</td>
+-      <td class="mono" style="font-size:11px;">${o.factura_numero||'—'}</td>
++      <td class="mono" style="font-size:11px;">${o.status==='parcial' ? ocFacturas(o).length+' parcial(es) · '+ocAvanceFactura(o).pct.toFixed(0)+'%' : (o.factura_numero||'—')}</td>
+       <td>${badgeDe(o.status||'pendiente')}</td>
+       <td style="text-align:right;white-space:nowrap;">${facturar}${file}</td>
+     </tr>`;
+@@ -3612,11 +3637,16 @@ function renderPOList(){
+         const totalsRow = `<tr style="font-size:12px;border-top:1px solid var(--line);"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;color:var(--muted);">Subtotal sin imp.</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:600;">${money(subtotal)}</td></tr><tr style="font-size:12px;"><td colspan="3" style="padding:3px 10px;border:none;"></td><td style="padding:3px 10px;border:none;text-align:right;color:var(--muted);">IVA 16%</td><td style="padding:3px 10px;border:none;text-align:right;">${money(iva)}</td></tr><tr style="font-size:13px;"><td colspan="3" style="padding:4px 10px;border:none;"></td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">Total con IVA</td><td style="padding:4px 10px;border:none;text-align:right;font-weight:700;">${money(subtotal+iva)}</td></tr>`;
+         const prodTable = `<table style="width:100%;margin:0;"><thead><tr><th style="font-size:10px;padding:2px 10px;">Código</th><th style="font-size:10px;padding:2px 10px;">Producto</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Cantidad</th><th style="font-size:10px;padding:2px 10px;text-align:right;">P. Unitario</th><th style="font-size:10px;padding:2px 10px;text-align:right;">Valor Total</th></tr></thead><tbody>${prodRows}${totalsRow}</tbody></table>`;
+         const solPend = ocSolicitudPendiente(o);
+-        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        const avanceOC = ocAvanceFactura(o);
++        const badgeBase = o.status==='recibida' ? '<span class="badge badge-match-yes">Aceptada</span>' : o.status==='parcial' ? '<span class="badge" style="background:rgba(192,138,62,.14);color:#8A6224;border:1px solid #C08A3E;">Facturada parcial</span>' : o.status==='rechazada' ? '<span class="badge badge-match-no">Rechazada</span>' : o.status==='facturada' ? '<span class="badge badge-match-yes">Facturada</span>' : '<span class="badge badge-borrador">Pendiente</span>';
++        /* Barra de avance: cuanto de la OC ya se facturó, en valor. */
++        const barraParcial = o.status==='parcial'
++          ? `<div style="margin-top:5px;max-width:140px;"><div style="background:var(--paper-raised);border:1px solid var(--line);border-radius:4px;height:7px;overflow:hidden;"><div style="width:${avanceOC.pct.toFixed(1)}%;height:100%;background:#C08A3E;"></div></div><div style="font-size:10px;color:var(--muted);margin-top:3px;line-height:1.45;">${avanceOC.pct.toFixed(0)}% facturado · faltan ${money(avanceOC.resto)}<br>${ocFacturas(o).length} parcialidad(es)</div></div>`
++          : '';
+         /* En revisión: el asociado ya pidió el cambio y falta que lo autorice el admin. */
+         const statusBadge = solPend
+-          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>'
+-          : badgeBase;
++          ? badgeBase + '<div style="margin-top:4px;"><span class="badge" style="font-size:10px;background:var(--kraft-soft);color:var(--kraft);border:1px solid var(--kraft);">⏳ En revisión · '+(OC_ACCION_ETIQUETA[solPend.accion]||solPend.accion)+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">Pidió: '+(solPend.solicitadoPor||'—')+'</div>' + barraParcial
++          : badgeBase + barraParcial;
+         const urgentBadge = o.urgente ? ' <span class="badge badge-match-no" style="font-size:10px;">⚠ URGENTE</span>' : '';
+         const alertaBadge = chequeo.nivel==='bad'
+           ? '<div style="margin-top:4px;"><span class="badge badge-match-no" style="font-size:10px;">⛔ REVISAR PRECIO</span></div>'
+@@ -3638,7 +3668,15 @@ function renderPOList(){
+         } else if(o.status==='pendiente'){
+           ocBotones = `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;" title="${esAdmin?'Aceptar la OC':'Pedir autorización para aceptar'}" onclick="setClientOCStatus('${o.id}','recibida')">✓</button><button class="btn btn-ghost" style="color:var(--brick);font-size:11px;" title="${esAdmin?'Rechazar la OC':'Pedir autorización para rechazar'}" onclick="setClientOCStatus('${o.id}','rechazada')">✗</button>`;
+         } else {
+-          ocBotones = `${o.status==='recibida' ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar'}" onclick="marcarFacturada('${o.id}')">$</button>` : ''}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
++          /* Aceptada o parcial: se puede facturar por partes (½) o cerrar el total ($). */
++          const puedeFacturarOC = o.status==='recibida' || o.status==='parcial';
++          const btnParcialOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:#C08A3E;font-size:11px;font-weight:700;" title="${esAdmin?'Registrar una facturación parcial':'Pedir autorización de una facturación parcial'}" onclick="abrirFacturaParcial('${o.id}')">&frac12;</button>`
++            : '';
++          const btnTotalOC = puedeFacturarOC
++            ? `<button class="btn btn-ghost" style="color:var(--teal);font-size:11px;font-weight:700;" title="${o.status==='parcial' ? (esAdmin?'Cerrar el remanente y archivar':'Pedir autorización para cerrar el remanente') : (esAdmin?'Marcar facturada y archivar':'Pedir autorización para facturar')}" onclick="marcarFacturada('${o.id}')">$</button>`
++            : '';
++          ocBotones = `${btnParcialOC}${btnTotalOC}<button class="btn btn-ghost" style="font-size:11px;" title="${esAdmin?'Regresar a pendiente':'Pedir autorización para regresar a pendiente'}" onclick="setClientOCStatus('${o.id}','pendiente')">↩</button>`;
+         }
+         const actions = `<div style="display:flex;gap:4px;">${editBtn}${ocBotones}${delBtn}</div>`;
+         html += `<tr style="${chequeo.nivel==='bad'?'box-shadow:inset 4px 0 0 #A63A3A;':chequeo.nivel==='warn'?'box-shadow:inset 4px 0 0 #C08A3E;':''}"><td class="mono">${o.oc_number}${urgentBadge}${alertaBadge}</td><td colspan="2">${prodTable}</td><td>${o.date_submitted||'—'}${fechaDeseada}</td><td>${o.notes||'—'}</td><td>${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;cursor:pointer;font-weight:600;">👁 ${o.fileName}</a><br><a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:10.5px;cursor:pointer;">⬇ descargar</a>` : '—'}</td><td>${statusBadge}</td><td>${actions}</td></tr>`;
+@@ -3675,7 +3713,9 @@ function renderOCArchivo(list){
+     const badge = esFact
+       ? `<span class="badge" style="font-size:10px;background:var(--paper-raised);color:var(--muted);border:1px solid var(--line);">Facturada</span>`
+       : `<span class="badge badge-match-no" style="font-size:10px;">Rechazada</span>`;
+-    const fact = o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '';
++    const nParc = ocFacturas(o).length;
++    const fact = (o.factura_numero ? `<span class="mono" style="font-size:11px;color:var(--muted);"> · Factura ${o.factura_numero}${o.factura_fecha?' ('+o.factura_fecha+')':''}</span>` : '')
++               + (nParc ? `<span style="font-size:11px;color:var(--muted);"> · ${nParc} parcialidad(es)</span>` : '');
+     html += `<tr style="font-size:12px;background:#fff;">
+       <td class="mono" style="padding:6px 10px;">${o.oc_number}</td>
+       <td colspan="2" style="padding:6px 10px;color:var(--muted);">${cl?cl.name:'—'}${fact}</td>
+@@ -3684,23 +3724,202 @@ function renderOCArchivo(list){
+       <td style="padding:6px 10px;">${o.fileName ? `<a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}','view');return false;" style="color:var(--teal);font-size:11px;">👁 ver</a> <a href="#" onclick="downloadOCFile('${o.id}','${o.fileName}');return false;" style="color:var(--kraft);font-size:11px;">⬇</a>` : '—'}</td>
+       <td style="padding:6px 10px;">${badge}</td>
+       <td style="padding:6px 10px;"><div style="display:flex;gap:4px;">
+-        <button class="btn btn-ghost" style="font-size:11px;" title="Regresar a activas" onclick="setClientOCStatus('${o.id}','recibida')">↩</button>
++        ${esFact && currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--kraft);font-size:11px;" title="Editar esta OC facturada" onclick="openPOModal('${o.id}')">✏</button>` : ''}
++        <button class="btn btn-ghost" style="font-size:11px;" title="${esFact?'Regresar a Aceptada conservando el número de factura':'Regresar a activas'}" onclick="${esFact ? `reabrirOCFacturada('${o.id}')` : `setClientOCStatus('${o.id}','recibida')`}">↩</button>
+         ${currentRole==='admin' ? `<button class="btn btn-ghost" style="color:var(--muted);font-size:11px;" onclick="deleteClientOC('${o.id}')">🗑</button>` : ''}
+       </div></td></tr>`;
+   });
+   return html;
+ }
+ 
+-/* Marca una OC como facturada y la manda al archivo */
++/* ══════════ FACTURACIÓN PARCIAL DE OCs ══════════
++   Una OC aceptada casi nunca se factura de un jalón: salen 20 mil de las
++   50 mil piezas y ésas ya se cobran. Cada parcialidad se guarda en
++   oc.facturas = [{id, folio, fecha, lineas:[{i, codigo, product, cantidad}]}],
++   donde 'i' es la posición de la línea dentro de oc.lines.
++   Mientras falten piezas la OC se queda en activas con estatus 'parcial'
++   y barra de avance; cuando ya no falta nada pasa sola a 'facturada' y se
++   archiva. Nada se borra: las parcialidades se conservan aunque la OC se
++   reabra desde el archivo.                                              */
++/* esc() del bloque CRM vive dentro de un IIFE; aquí se ocupa uno propio. */
++function fpEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
++function ocLineas(o){ return Array.isArray(o && o.lines) ? o.lines : Object.values((o && o.lines) || {}); }
++function ocFacturas(o){ return Array.isArray(o && o.facturas) ? o.facturas : Object.values((o && o.facturas) || {}); }
++function ocFacturaLineas(f){ return Array.isArray(f && f.lineas) ? f.lineas : Object.values((f && f.lineas) || {}); }
++
++/* Piezas ya facturadas de una línea, sumando todas las parcialidades. */
++function ocFacturadoLinea(o, idx){
++  return ocFacturas(o).reduce((s,f)=> s + ocFacturaLineas(f).reduce((a,l)=>
++    a + (Number(l && l.i) === Number(idx) ? (Number(l.cantidad)||0) : 0), 0), 0);
++}
++function ocPendienteLinea(o, idx){
++  const l = ocLineas(o)[idx] || {};
++  return Math.max(0, (Number(l.quantity)||0) - ocFacturadoLinea(o, idx));
++}
++/* Avance en dinero: lo facturado contra el valor total de la OC, sin IVA. */
++function ocAvanceFactura(o){
++  let total = 0, fact = 0;
++  ocLineas(o).forEach((l,i)=>{
++    const q = Number(l.quantity)||0, pu = Number(l.unit_price)||0;
++    total += q*pu;
++    fact  += Math.min(q, ocFacturadoLinea(o,i))*pu;
++  });
++  const pct = total > 0 ? Math.min(100, fact/total*100) : 0;
++  return {total:total, facturado:fact, resto:Math.max(0, total-fact), pct:pct};
++}
++function ocFacturaCompleta(o){
++  const ls = ocLineas(o);
++  if(!ls.length) return false;
++  return ls.every((l,i)=> ocFacturadoLinea(o,i) >= (Number(l.quantity)||0) - 0.000001);
++}
++
++/* ---- Modal de captura de una parcialidad ---- */
++let fpOCId = null;
++
++function abrirFacturaParcial(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  if(oc.status !== 'recibida' && oc.status !== 'parcial'){ showToast('Solo se factura por partes una OC ya aceptada'); return; }
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  fpOCId = id;
++  const cl = clientById(oc.client_id);
++  const av = ocAvanceFactura(oc);
++  document.getElementById('fp-encabezado').innerHTML =
++    'OC <strong class="mono">'+fpEsc(oc.oc_number)+'</strong> · '+fpEsc(cl?cl.name:'—')+
++    ' · facturado '+money(av.facturado)+' de '+money(av.total)+' ('+av.pct.toFixed(0)+'%)';
++  document.getElementById('fp-folio').value = '';
++  document.getElementById('fp-fecha').value = hoyMX();
++
++  const ls = ocLineas(oc);
++  document.getElementById('fp-lineas').innerHTML = ls.length ? ls.map((l,i)=>{
++    const q = Number(l.quantity)||0;
++    const ya = ocFacturadoLinea(oc, i);
++    const pend = Math.max(0, q - ya);
++    return '<div style="display:grid;grid-template-columns:0.8fr 2fr 1fr 1fr 1.2fr;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:6px;">'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Código</div><span class="mono">'+fpEsc(l.codigo||'—')+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Producto</div>'+fpEsc(l.product||'—')+'</div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Pedidas</div><span class="mono">'+qty(q)+'</span></div>'+
++      '<div style="font-size:12px;"><div style="color:var(--muted);font-size:10px;">Ya facturadas</div><span class="mono">'+qty(ya)+'</span></div>'+
++      '<div class="field" style="margin:0;"><label>Facturar ahora (máx '+qty(pend)+')</label>'+
++        '<input type="number" class="fp-qty" data-idx="'+i+'" min="0" max="'+pend+'" step="1" value="0" '+(pend<=0?'disabled':'')+' oninput="fpResumen()"></div>'+
++    '</div>';
++  }).join('') : '<div class="empty">Esta OC no tiene líneas de producto</div>';
++
++  document.getElementById('fp-historial').innerHTML = fpHistorialHTML(oc);
++  fpResumen();
++  document.getElementById('modal-oc-parcial').classList.add('active');
++}
++
++/* Lo que se está capturando ahora, en piezas y en dinero. */
++function fpResumen(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc) return;
++  const ls = ocLineas(oc);
++  let val = 0, piezas = 0;
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    const l = ls[i] || {};
++    val += n * (Number(l.unit_price)||0);
++    piezas += n;
++  });
++  const av = ocAvanceFactura(oc);
++  const resto = Math.max(0, av.resto - val);
++  document.getElementById('fp-resumen').innerHTML =
++    'Esta parcialidad: <strong>'+qty(piezas)+'</strong> pieza(s) · <strong>'+money(val)+'</strong> sin IVA ('+money(val*1.16)+' con IVA) · quedaría pendiente '+money(resto) +
++    ((val > 0 && resto <= 0.000001) ? ' — <span style="color:var(--teal);font-weight:600;">con esto la OC queda facturada por completo y se archiva</span>' : '');
++}
++
++function fpHistorialHTML(oc){
++  const fs = ocFacturas(oc);
++  if(!fs.length) return '';
++  const ls = ocLineas(oc);
++  return '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">Parcialidades ya registradas</div>' +
++    fs.map(f=>{
++      const det = ocFacturaLineas(f).filter(l=>(Number(l.cantidad)||0)>0).map(l=>{
++        const base = ls[Number(l.i)] || {};
++        return fpEsc(l.product || base.product || base.codigo || '—')+': '+qty(Number(l.cantidad)||0);
++      }).join(' · ');
++      const val = ocFacturaLineas(f).reduce((a,l)=>{
++        const base = ls[Number(l.i)] || {};
++        return a + (Number(l.cantidad)||0) * (Number(base.unit_price)||0);
++      }, 0);
++      return '<div style="font-size:12px;padding:6px 0;border-top:1px solid var(--line);">'+
++        '<span class="mono" style="font-weight:600;">'+fpEsc(f.folio || 'sin folio')+'</span>'+
++        '<span style="color:var(--muted);"> · '+fpEsc(f.fecha||'—')+' · '+money(val)+
++        (f.registradoPor?' · '+fpEsc(f.registradoPor):'')+'</span>'+
++        '<div style="color:var(--muted);font-size:11px;margin-top:2px;">'+(det||'—')+'</div></div>';
++    }).join('');
++}
++
++function guardarFacturaParcial(){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===fpOCId);
++  if(!oc){ showToast('No encontré esa orden de compra'); return; }
++  const folio = document.getElementById('fp-folio').value.trim();
++  const fecha = document.getElementById('fp-fecha').value || hoyMX();
++  const ls = ocLineas(oc);
++  const captura = [];
++  let excede = '';
++  document.querySelectorAll('#fp-lineas .fp-qty').forEach(inp=>{
++    const i = Number(inp.dataset.idx);
++    const n = Math.max(0, Number(inp.value)||0);
++    if(n <= 0) return;
++    const l = ls[i] || {};
++    if(n > ocPendienteLinea(oc, i) + 0.000001){ excede = l.product || l.codigo || ('línea '+(i+1)); return; }
++    captura.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:n});
++  });
++  if(excede){ showToast('No puedes facturar más de lo que falta en «'+excede+'»'); return; }
++  if(!captura.length){ showToast('Captura al menos una pieza para facturar'); return; }
++  if(!folio && !confirm('Vas a guardar esta parcialidad sin folio de factura.\n\n¿Continuar?')) return;
++  closeModal('modal-oc-parcial');
++  setClientOCStatus(oc.id, 'parcial', {parcial:{folio:folio, fecha:fecha, lineas:captura}});
++}
++
++/* Marca una OC como facturada y la manda al archivo.
++   Si ya tiene parcialidades, el botón $ cierra únicamente el remanente. */
+ /* Facturar también lo autoriza el administrador. */
+ function marcarFacturada(id){
+   const oc = (DB.clientOCs||[]).find(o=>o.id===id);
+   if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++
++  if(ocFacturas(oc).length){
++    const resto = [];
++    ocLineas(oc).forEach((l,i)=>{
++      const pend = ocPendienteLinea(oc, i);
++      if(pend > 0) resto.push({i:i, codigo:l.codigo||'', product:l.product||'', cantidad:pend});
++    });
++    if(!resto.length){
++      setClientOCStatus(id, 'facturada', {factura_numero:oc.factura_numero||'', factura_fecha:oc.factura_fecha||hoyMX()});
++      return;
++    }
++    const av = ocAvanceFactura(oc);
++    const folio = prompt('Cerrar el remanente de la OC '+oc.oc_number+'.\n\nFaltan '+money(av.resto)+' sin IVA ('+(100-av.pct).toFixed(0)+'% de la orden).\n\nFolio de la factura del remanente (opcional):', '');
++    if(folio===null) return;
++    setClientOCStatus(id, 'parcial', {parcial:{folio:folio.trim(), fecha:hoyMX(), lineas:resto}});
++    return;
++  }
++
+   if(!esAdminActual()){ setClientOCStatus(id, 'facturada'); return; }
+   const num = prompt('Número de factura para la OC ' + oc.oc_number + ' (opcional):', oc.factura_numero||'');
+   if(num===null) return;
+   setClientOCStatus(id, 'facturada', {factura_numero:num.trim(), factura_fecha:hoyMX()});
+ }
++
++/* Reabrir una OC del archivo: regresa a Aceptada conservando el número de
++   factura y las parcialidades, y queda asentado en el historial de
++   autorizaciones (como cualquier otro cambio de estatus). */
++function reabrirOCFacturada(id){
++  const oc = (DB.clientOCs||[]).find(o=>o.id===id);
++  if(!oc) return;
++  if(ocSolicitudPendiente(oc)){ showToast('Esa OC ya tiene una solicitud esperando autorización'); return; }
++  const nParc = ocFacturas(oc).length;
++  const conFactura = oc.factura_numero
++    ? '\n\nSe conserva la factura '+oc.factura_numero+(oc.factura_fecha?' ('+oc.factura_fecha+')':'')+'.' : '';
++  const conParciales = nParc ? '\nLas '+nParc+' parcialidad(es) registradas no se borran.' : '';
++  if(!confirm('¿Regresar la OC '+oc.oc_number+' a Aceptada?\n\nSale del archivo y vuelve a las órdenes activas.'+conFactura+conParciales)) return;
++  setClientOCStatus(id, 'recibida', {motivo:'Reapertura de OC facturada'+(oc.factura_numero?' — factura '+oc.factura_numero:'')});
++}
+ /* ══════════ AUTORIZACIÓN DEL ADMINISTRADOR ══════════
+    Ningún cambio de estatus de una OC de cliente surte efecto si no lo
+    autoriza un administrador: aceptar, rechazar, facturar y regresar a
+@@ -3709,7 +3928,7 @@ function marcarFacturada(id){
+    cliente sigue viendo 'Pendiente' hasta que el admin la acepte.
+    Nada se pierde: cada solicitud y cada decisión se agregan a
+    oc.autorizaciones, que solo crece.                                  */
+-const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', facturada:'Facturar', rechazada:'Rechazar'};
++const OC_ACCION_ETIQUETA = {pendiente:'Regresar a pendiente', recibida:'Aceptar', parcial:'Facturar parcialmente', facturada:'Facturar', rechazada:'Rechazar'};
+ 
+ function esAdminActual(){ return currentRole === 'admin'; }
+ 
+@@ -3725,6 +3944,37 @@ function ocRegistrarAutorizacion(oc, entrada){
+ 
+ function ocAplicarEstatus(oc, accion, extra){
+   const e = extra || {};
++  /* Facturación parcial: no es un estatus que se ponga a mano, es el
++     resultado de sumar parcialidades. Se guarda la parcialidad y la OC
++     se acomoda sola: 'parcial' mientras falte algo, 'facturada' cuando
++     ya no falta nada. */
++  if(accion === 'parcial'){
++    const p = e.parcial || {};
++    const lineas = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas || {}))
++                     .filter(l => l && (Number(l.cantidad)||0) > 0)
++                     .map(l => ({i:Number(l.i)||0, codigo:l.codigo||'', product:l.product||'', cantidad:Number(l.cantidad)||0}));
++    oc.facturas = ocFacturas(oc).slice();
++    oc.facturas.push({
++      id: uid('fac'),
++      folio: (p.folio||'').trim(),
++      fecha: p.fecha || hoyMX(),
++      lineas: lineas,
++      registradoPor: usuarioActual(),
++      registradoEn: new Date().toISOString()
++    });
++    if(ocFacturaCompleta(oc)){
++      oc.status = 'facturada';
++      const ult = oc.facturas[oc.facturas.length-1];
++      oc.factura_numero = oc.factura_numero || ult.folio || '';
++      oc.factura_fecha  = ult.fecha || hoyMX();
++    } else {
++      oc.status = 'parcial';
++    }
++    oc.statusUpdatedAt = new Date().toISOString();
++    oc.statusUpdatedBy = usuarioActual();
++    oc.autorizacion_pendiente = null;
++    return;
++  }
+   oc.status = accion;
+   if(accion === 'facturada'){
+     oc.factura_numero = e.factura_numero !== undefined ? e.factura_numero : (oc.factura_numero||'');
+@@ -3757,6 +4007,7 @@ function setClientOCStatus(id, newStatus, extra){
+       desde: oc.status || 'pendiente',
+       motivo: nota.trim(),
+       factura_numero: (extra && extra.factura_numero) || '',
++      parcial: (extra && extra.parcial) || null,
+       solicitadoPor: usuarioActual(),
+       solicitadoEn: ahora
+     };
+@@ -3767,8 +4018,15 @@ function setClientOCStatus(id, newStatus, extra){
+   }
+ 
+   ocAplicarEstatus(oc, newStatus, extra);
+-  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora});
++  ocRegistrarAutorizacion(oc, {accion:newStatus, resultado:'autorizada', por:usuarioActual(), fecha:ahora, motivo:(extra && extra.motivo) || ''});
+   ocRefrescar();
++  if(newStatus === 'parcial'){
++    const av = ocAvanceFactura(oc);
++    showToast(oc.status === 'facturada'
++      ? 'OC '+oc.oc_number+' facturada por completo — se archivó'
++      : 'Parcialidad registrada — OC '+oc.oc_number+' va al '+av.pct.toFixed(0)+'%, faltan '+money(av.resto));
++    return;
++  }
+   showToast('OC '+oc.oc_number+': '+etiqueta.toLowerCase()+' — autorizado');
+ }
+ 
+@@ -3786,6 +4044,12 @@ function autorizarOC(id){
+     if(num===null) return;
+     extra.factura_numero = num.trim();
+     extra.factura_fecha = hoyMX();
++  } else if(sol.accion === 'parcial'){
++    const p = sol.parcial || {};
++    const det = (Array.isArray(p.lineas) ? p.lineas : Object.values(p.lineas||{}))
++                  .map(l=>'· '+(l.product||l.codigo||'—')+': '+qty(Number(l.cantidad)||0)).join('\n');
++    if(!confirm('¿Autorizar la facturación parcial de la OC '+oc.oc_number+'?\n\nFolio: '+(p.folio||'sin folio')+'   Fecha: '+(p.fecha||hoyMX())+'\n\n'+det+'\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
++    extra.parcial = p;
+   } else {
+     if(!confirm('¿Autorizar «'+etiqueta+'» para la OC '+oc.oc_number+'?\n\nSolicitó: '+(sol.solicitadoPor||'—')+(sol.motivo?('\nNota: '+sol.motivo):''))) return;
+   }
+@@ -5961,7 +6225,7 @@ function fechaOC(o){
+ }
+ function pasaEstado(st){
+   if(S.estados==='todas') return true;
+-  if(S.estados==='cerradas') return st==='recibida'||st==='facturada';
++  if(S.estados==='cerradas') return st==='recibida'||st==='parcial'||st==='facturada';
+   return st!=='rechazada'&&st!=='cancelada'&&st!=='borrador';
+ }
+ 
+-- 
+2.43.0
+
